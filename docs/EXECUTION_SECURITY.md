@@ -1,0 +1,13 @@
+# Execution threat model
+
+Model-generated desktop Python is never evaluated. Desktop plans are typed JSON routed to existing allowlisted handlers and the shared file policy.
+
+Generated programs require optional Docker Desktop using Linux containers (Windows 10/11 with supported virtualization/WSL2) or Docker Engine on Linux. macOS may use Docker Desktop. Set `JARVIS_RUNNER_IMAGE` to an administrator-reviewed, locally installed image **pinned by its real digest**; the app does not invent/pull an image. Docker is not mandatory for generation/editing. No runner means `unavailable`, not success or a host fallback.
+
+Runs copy the approved project to a disposable staging directory, reject symlinks/reparse points and sensitive metadata, mount it read-only, disable networking, drop capabilities, forbid privilege gain, restrict processes/CPU/memory, use a non-root user and a small temporary filesystem. No assistant credentials or environment variables are forwarded. Timeouts/cancellation kill the host CLI process tree and explicitly remove the named container. Exit zero means only “exited successfully”; no application readiness is inferred. Output is bounded.
+
+The image, Docker daemon and kernel remain trusted. Containers do not defend against kernel/daemon vulnerabilities. The app's own trusted plugins and desktop tools run as the user; Python plugins are not sandboxed. A venv isolates dependencies, not permissions. Do not run untrusted code directly on the host. The runner is read-only; projects needing persistent outputs/network/GUI require a separately designed reviewed policy, not an automatic fallback.
+
+Dependencies are explicit, pinned distribution proposals. Review their provenance, versions and transitive dependencies; install manually into the **generated project's** `.venv` (never the assistant venv). Current runner images must already include needed reviewed dependencies. Automatic import-to-PyPI conversion is removed. Automated tests validate host result reporting with disposable trusted fixtures and runner command construction; real Docker isolation requires the optional machine-dependent smoke check.
+
+File recovery copies are disk-backed under `config/recovery`, contain private file contents and must be protected/backed up like user data. Failed backup aborts mutation. Undo refuses when content/mtime changed. No recovery garbage collection is automatic. In-process locks serialize assistant mutations; the policy is not a defense against a malicious local process racing path checks. Broad home/machine scopes and assistant secrets/metadata cannot be granted. File selection grants one file, not its parent directory.

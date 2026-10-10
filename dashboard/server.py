@@ -1,7 +1,8 @@
+from core.dashboard_security import RateLimit, RequestLimits
 """
 dashboard/server.py — JARVIS Local HTTP Dashboard
 
-Plain HTTP on port 8000 (no SSL warnings, no firewall issues).
+TLS-only remote dashboard on port 8000, inactive until local UI activation.
 Security at the application layer: AES-256-CBC with session-key-derived key.
 CryptoJS is auto-downloaded once and served locally — no CDN needed after that.
 
@@ -38,22 +39,12 @@ except Exception:
 BASE_DIR    = Path(__file__).resolve().parent.parent
 STATIC_DIR  = Path(__file__).parent / "static"
 PORT        = 8000
-MAX_UPLOAD_MB = 500
+MAX_UPLOAD_MB = 25
 
 
 def _make_uploads_dir() -> Path:
-    """Return (and create) the cross-platform uploads folder."""
-    for candidate in [
-        Path.home() / "Downloads" / "JARVIS Uploads",
-        Path.home() / "Documents" / "JARVIS Uploads",
-        BASE_DIR / "uploads",
-    ]:
-        try:
-            candidate.mkdir(parents=True, exist_ok=True)
-            return candidate
-        except Exception:
-            pass
-    return BASE_DIR / "uploads"
+    from core.path_policy import DEFAULT_WORKSPACE
+    return DEFAULT_WORKSPACE / 'RemoteUploads'  # no filesystem mutation during import
 
 
 UPLOADS_DIR = _make_uploads_dir()
@@ -97,227 +88,13 @@ _CRYPTOJS_FILE = STATIC_DIR / "crypto-js.min.js"
 
 
 def _ensure_network_access(port: int) -> None:
-    """Cross-platform, best-effort: open port in the OS firewall for LAN access.
-
-    Runs in a background thread — never blocks uvicorn startup.
-
-    Windows : writes a .bat file, runs it elevated via Windows ShellExecuteW
-              (native UAC dialog, guaranteed to appear). One-time setup.
-    macOS   : osascript admin dialog if the Application Firewall is on.
-    Linux   : pkexec GUI → sudo -n → prints manual command as fallback.
-    """
-    import sys, subprocess, os, tempfile, threading
-
-    # ── Windows ──────────────────────────────────────────────────────────────
-    if sys.platform == "win32":
-        import ctypes, time
-
-        port_rule = f"JARVIS Dashboard Port {port}"
-        prog_rule  = "JARVIS Dashboard Python"
-        py_exe     = sys.executable
-
-        def _netsh_rule_exists(name: str) -> bool:
-            try:
-                r = subprocess.run(
-                    ["netsh", "advfirewall", "firewall", "show", "rule", f"name={name}"],
-                    capture_output=True, text=True, timeout=5,
-                )
-                return r.returncode == 0 and "No rules match" not in r.stdout
-            except Exception:
-                return False
-
-        def _network_is_public() -> bool:
-            try:
-                r = subprocess.run(
-                    ["powershell", "-NoProfile", "-NonInteractive", "-Command",
-                     "(Get-NetConnectionProfile | "
-                     "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                     "Measure-Object).Count"],
-                    capture_output=True, text=True, timeout=6,
-                )
-                return r.stdout.strip() not in ("", "0")
-            except Exception:
-                return False
-
-        need_port    = not _netsh_rule_exists(port_rule)
-        need_prog    = not _netsh_rule_exists(prog_rule)
-        need_private = _network_is_public()
-
-        if not need_port and not need_prog and not need_private:
-            return  # already fully configured
-
-        # Build a .bat file — netsh + powershell, runs fast when elevated
-        bat_lines = ["@echo off"]
-        if need_private:
-            bat_lines.append(
-                'powershell -NoProfile -NonInteractive -Command "'
-                'Get-NetConnectionProfile | '
-                "Where-Object {$_.NetworkCategory -eq 'Public'} | "
-                'Set-NetConnectionProfile -NetworkCategory Private"'
-            )
-        if need_port:
-            bat_lines.append(
-                f'netsh advfirewall firewall add rule '
-                f'name="{port_rule}" protocol=TCP dir=in '
-                f'localport={port} action=allow'
-            )
-        if need_prog:
-            bat_lines.append(
-                f'netsh advfirewall firewall add rule '
-                f'name="{prog_rule}" dir=in action=allow '
-                f'program="{py_exe}" enable=yes'
-            )
-
-        bat_body = "\r\n".join(bat_lines) + "\r\n"
-        fd, bat_path = tempfile.mkstemp(suffix=".bat", prefix="jarvis_fw_")
-        try:
-            os.write(fd, bat_body.encode("mbcs"))   # Windows cmd.exe expects ANSI
-            os.close(fd)
-        except Exception:
-            try:
-                os.close(fd)
-            except Exception:
-                pass
-            return
-
-        # ── Try running directly (succeeds when already admin) ────────────────
-        try:
-            r = subprocess.run(
-                [bat_path], capture_output=True, timeout=8, shell=True
-            )
-            if r.returncode == 0:
-                print(f"[Dashboard] Firewall configured for port {port}.")
-                try:
-                    os.unlink(bat_path)
-                except Exception:
-                    pass
-                return
-        except Exception:
-            pass
-
-        # ── ShellExecuteW: native UAC elevation (most reliable on Windows) ────
-        # ShellExecuteW with verb "runas" always shows the UAC dialog regardless
-        # of UAC level settings. Non-blocking — uvicorn is already running.
-        print("[Dashboard] One-time network setup required.")
-        print("[Dashboard] >>> A Windows security dialog will appear — click 'Yes' <<<")
-        try:
-            ret = ctypes.windll.shell32.ShellExecuteW(
-                None,       # hwnd  (no parent window)
-                "runas",    # verb  (request elevation)
-                bat_path,   # file  (our .bat)
-                None,       # params
-                None,       # working dir
-                0,          # SW_HIDE (run without a visible cmd window)
-            )
-            if int(ret) > 32:
-                # ShellExecuteW returns immediately; bat finishes in ~1 second.
-                # Sleep briefly so the rules are in place before the first retry.
-                time.sleep(2)
-                print(f"[Dashboard] Network setup complete — port {port} is open.")
-                print("[Dashboard] Refresh your phone browser to connect.")
-            else:
-                print("[Dashboard] Setup was not allowed.")
-                print("[Dashboard] Phone connections may fail until JARVIS is run as Administrator.")
-        except Exception as e:
-            print(f"[Dashboard] Firewall setup error: {e}")
-        finally:
-            # Cleanup after the bat has had time to run
-            def _cleanup(path: str) -> None:
-                time.sleep(5)
-                try:
-                    os.unlink(path)
-                except Exception:
-                    pass
-            threading.Thread(target=_cleanup, args=(bat_path,), daemon=True).start()
-        return
-
-    # ── macOS ─────────────────────────────────────────────────────────────────
-    if sys.platform == "darwin":
-        fw_ctl = "/usr/libexec/ApplicationFirewall/socketfilterfw"
-        try:
-            r = subprocess.run(
-                [fw_ctl, "--getglobalstate"], capture_output=True, text=True, timeout=5,
-            )
-            if "disabled" in r.stdout.lower():
-                return  # firewall off — nothing to do
-
-            py = sys.executable
-            listed = subprocess.run(
-                [fw_ctl, "--listapps"], capture_output=True, text=True, timeout=5,
-            )
-            if py in listed.stdout:
-                return  # already allowed
-
-            print("[Dashboard] One-time network setup — enter your password in the macOS dialog.")
-            subprocess.run(
-                ["osascript", "-e",
-                 f'do shell script "{fw_ctl} --add {py} && {fw_ctl} --unblockapp {py}"'
-                 f' with administrator privileges'],
-                timeout=60,
-            )
-        except Exception:
-            pass  # macOS firewall is off by default — silent failure is fine
-        return
-
-    # ── Linux ─────────────────────────────────────────────────────────────────
-    def _privileged(cmd: list[str]) -> bool:
-        for prefix in (["pkexec"], ["sudo", "-n"]):
-            try:
-                r = subprocess.run(prefix + cmd, capture_output=True, timeout=30)
-                if r.returncode == 0:
-                    return True
-            except Exception:
-                pass
-        return False
-
-    try:  # ufw
-        r = subprocess.run(["ufw", "status"], capture_output=True, text=True, timeout=5)
-        if "active" in r.stdout.lower():
-            if _privileged(["ufw", "allow", f"{port}/tcp"]):
-                print(f"[Dashboard] ufw: port {port} allowed.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo ufw allow {port}/tcp")
-            return
-    except FileNotFoundError:
-        pass
-
-    try:  # firewalld
-        r = subprocess.run(
-            ["firewall-cmd", "--state"], capture_output=True, text=True, timeout=5,
-        )
-        if "running" in r.stdout.lower():
-            ok = (_privileged(["firewall-cmd", "--add-port", f"{port}/tcp", "--permanent"])
-                  and _privileged(["firewall-cmd", "--reload"]))
-            if ok:
-                print(f"[Dashboard] firewalld: port {port} allowed.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo firewall-cmd --add-port={port}/tcp --permanent && sudo firewall-cmd --reload")
-            return
-    except FileNotFoundError:
-        pass
-
-    try:  # iptables (not persistent but works until reboot)
-        r = subprocess.run(["iptables", "-L", "INPUT", "-n"], capture_output=True, timeout=5)
-        if r.returncode == 0:
-            if _privileged(["iptables", "-A", "INPUT", "-p", "tcp", "--dport", str(port), "-j", "ACCEPT"]):
-                print(f"[Dashboard] iptables: port {port} opened.")
-            else:
-                print(f"[Dashboard] Run manually:  sudo iptables -A INPUT -p tcp --dport {port} -j ACCEPT")
-    except FileNotFoundError:
-        pass  # no iptables means firewall is probably off — nothing to do
+    """Compatibility function: never change firewall or network categories."""
+    print(f"[Dashboard] Network policy unchanged. Configure port {port} manually only if desired.")
 
 
 def _ensure_crypto_js() -> None:
-    if _CRYPTOJS_FILE.exists():
-        return
-    try:
-        import urllib.request
-        print("[Dashboard] Downloading CryptoJS (one-time setup)…")
-        urllib.request.urlretrieve(_CRYPTOJS_CDN, str(_CRYPTOJS_FILE))
-        print("[Dashboard] CryptoJS cached — will serve locally from now on.")
-    except Exception as e:
-        print(f"[Dashboard] CryptoJS download failed: {e}")
-        print(f"[Dashboard] Encryption will fall back to CDN load on client.")
+    if not _CRYPTOJS_FILE.exists():
+        raise RuntimeError('Bundled CryptoJS missing; restore from the source distribution.')
 
 
 _ensure_crypto_js()
@@ -370,8 +147,7 @@ def _ensure_certs() -> bool:
     present a certificate that matches it. Generating locally gives each install
     its own key, costs about a second, and happens exactly once.
 
-    Returns True when a usable pair exists afterwards; False leaves the caller on
-    plain HTTP, which still works — the QR code simply encodes http:// instead.
+    Returns True when a usable pair exists afterwards; False prevents serving; remote control never falls back to plaintext.
     """
     certs = BASE_DIR / "config" / "certs"
     key_p = certs / "jarvis.key"
@@ -387,7 +163,7 @@ def _ensure_certs() -> bool:
         from cryptography.hazmat.primitives.asymmetric import rsa
         from cryptography.x509.oid import NameOID
     except ImportError:
-        print("[Dashboard] cryptography not installed — serving over plain HTTP.")
+        print("[Dashboard] cryptography not installed — remote service unavailable; TLS is required.")
         print("[Dashboard] For HTTPS run:  pip install cryptography")
         return False
 
@@ -443,7 +219,7 @@ def _ensure_certs() -> bool:
         print(f"[Dashboard] Generated a self-signed certificate for this machine: {certs}")
         return True
     except Exception as e:
-        print(f"[Dashboard] Certificate generation failed ({e}) — serving over plain HTTP.")
+        print(f"[Dashboard] Certificate generation failed ({e}) — remote service unavailable; TLS is required.")
         return False
 
 
@@ -462,12 +238,17 @@ class DashboardServer:
         self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
         self._clients: set[WebSocket]     = set()
         self._history: list[dict]         = []
-        self._command_queue               = asyncio.Queue()
+        self._active = False
+        self._token_expiry = {}
+        self._ws_tokens = {}
+        self._rate = RateLimit()
+        self._server = None
+        self._command_queue               = asyncio.Queue(maxsize=32)
         self._wake_callback               = None
         self._connect_callback            = None
         self._pending_keys: dict[str, float] = {}
         self._device_sessions: dict[str, dict] = {}  # device_token → {session_key}
-        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=200)
+        self._phone_audio_queue: asyncio.Queue    = asyncio.Queue(maxsize=20)
         self._uploads_dir                 = UPLOADS_DIR
         self._login_html                  = _read("login.html")
         self._app_html                    = _read("app.html")
@@ -479,7 +260,9 @@ class DashboardServer:
         now = time.time()
         self._pending_keys = {k: v for k, v in self._pending_keys.items() if v > now}
         key = ''.join(secrets.choice(_KEY_CHARS) for _ in range(6))
-        self._pending_keys[key] = now + expiry_secs
+        if len(self._pending_keys)>=8: self._pending_keys.pop(next(iter(self._pending_keys)))
+        self._active = True  # trusted local UI invokes new_key; no remote activation endpoint
+        self._pending_keys[key] = now + min(max(expiry_secs,30),600)
         return key
 
     @staticmethod
@@ -488,7 +271,7 @@ class DashboardServer:
         return (certs / "jarvis.key").exists() and (certs / "jarvis.crt").exists()
 
     def get_url(self) -> str:
-        proto = "https" if self._ssl_enabled() else "http"
+        proto = "https"
         return f"{proto}://{self._ip}:{PORT}"
 
     def get_manual_url(self) -> str:
@@ -527,6 +310,8 @@ class DashboardServer:
             self._history = self._history[-300:]
         dead: set[WebSocket] = set()
         for ws in list(self._clients):
+            if not self._authorized(self._ws_tokens.get(ws,'')):
+                await self.invalidate(self._ws_tokens.get(ws,''));continue
             try:
                 await ws.send_json(msg)
             except Exception:
@@ -537,10 +322,29 @@ class DashboardServer:
 
     def _build_app(self) -> "FastAPI":
         app = FastAPI(docs_url=None, redoc_url=None)
+        app.add_middleware(RequestLimits,max_upload=MAX_UPLOAD_MB*1024*1024)
+        @app.middleware('http')
+        async def security_headers(req,call_next):
+            if req.url.path in {'/login','/auto-login','/api/device-login'} and req.method != 'GET' or req.url.path=='/auto-login':
+                if not self._rate.allow(req.client.host if req.client else 'unknown'):
+                    return JSONResponse({'error':'Too many pairing attempts'},status_code=429)
+            try: response=await call_next(req)
+            except (ValueError, TypeError):return JSONResponse({'error':'Invalid request'},status_code=400)
+            response.headers['Cache-Control']='no-store'
+            response.headers['Referrer-Policy']='no-referrer'
+            response.headers['X-Content-Type-Options']='nosniff'
+            return response
+
+        @app.post('/api/logout')
+        async def logout(req: Request):
+            token=req.headers.get('authorization','').removeprefix('Bearer ').strip()
+            if not self._authorized(token):return JSONResponse({'error':'Unauthorized'},status_code=401)
+            await self.invalidate(token)
+            return JSONResponse({'ok':True})
 
         def _auth(req: Request) -> bool:
             tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            return bool(tok) and tok in self._tokens
+            return self._authorized(tok)
 
         # serve CryptoJS from local cache, fallback to CDN redirect
         @app.get("/static/crypto.js")
@@ -570,10 +374,10 @@ class DashboardServer:
             body    = await req.json()
             entered = str(body.get("pin", "")).strip().upper()
             now     = time.time()
-            if entered in self._pending_keys and self._pending_keys[entered] > now:
+            if self._active and entered in self._pending_keys and self._pending_keys[entered] > now:
                 del self._pending_keys[entered]          # one-time use
                 tok = secrets.token_urlsafe(32)
-                self._tokens.add(tok)
+                self._issue(tok)
                 self._token_keys[tok] = entered
                 self._aes_key(entered)                   # pre-derive & cache
                 if self._connect_callback:
@@ -590,7 +394,7 @@ class DashboardServer:
         async def auto_login(key: str = ""):
             """QR code target — validates one-time key, creates session, redirects phone."""
             now = time.time()
-            if not key or key not in self._pending_keys or self._pending_keys[key] <= now:
+            if not self._active or not key or key not in self._pending_keys or self._pending_keys[key] <= now:
                 return HTMLResponse("""<!DOCTYPE html>
 <html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width">
 <style>
@@ -605,10 +409,10 @@ class DashboardServer:
             del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
             dev_tok = secrets.token_urlsafe(32)
-            self._tokens.add(tok)
+            self._issue(tok)
             self._token_keys[tok] = key
             self._aes_key(key)
-            self._device_sessions[dev_tok] = {"session_key": key}
+            self._device_sessions[dev_tok] = {"session_key": key, "expires": time.time()+30*86400}
 
             if self._connect_callback:
                 self._connect_callback()
@@ -641,11 +445,11 @@ class DashboardServer:
             except Exception:
                 return JSONResponse({"ok": False}, status_code=400)
             dev_tok = (body.get("device_token") or "").strip()
-            if not dev_tok or dev_tok not in self._device_sessions:
+            if not dev_tok or dev_tok not in self._device_sessions or self._device_sessions[dev_tok]["expires"]<=time.time():
                 return JSONResponse({"ok": False}, status_code=401)
             session_key = self._device_sessions[dev_tok]["session_key"]
             tok = secrets.token_urlsafe(32)
-            self._tokens.add(tok)
+            self._issue(tok)
             self._token_keys[tok] = session_key
             self._aes_key(session_key)
             if self._connect_callback:
@@ -661,7 +465,7 @@ class DashboardServer:
             if not _auth(req):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             count = len(self._device_sessions)
-            self._device_sessions.clear()
+            await self.revoke_all()
             return JSONResponse({"ok": True, "revoked": count})
 
         @app.post("/api/command")
@@ -678,7 +482,9 @@ class DashboardServer:
             else:
                 text = (body.get("text") or "").strip()
             if text:
-                await self._command_queue.put(text)
+                if len(text)>4096:return JSONResponse({'error':'Command too long'},status_code=413)
+                try:self._command_queue.put_nowait(text)
+                except asyncio.QueueFull:return JSONResponse({'error':'Command queue full'},status_code=429)
                 if self._wake_callback:
                     self._wake_callback()
             return JSONResponse({"ok": True})
@@ -696,16 +502,24 @@ class DashboardServer:
         @app.websocket("/ws/phone-audio")
         async def phone_audio_ws(websocket: WebSocket, token: str = ""):
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not self._authorized(tok):
                 await websocket.close(code=4001)
                 return
+            if len(self._ws_tokens)>=16:
+                await websocket.close(code=4008);return
             await websocket.accept()
+            self._ws_tokens[websocket]=tok
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Phone microphone live."}
             ))
             try:
                 while True:
-                    data = await websocket.receive_bytes()
+                    if not self._authorized(tok):break
+                    try: data = await asyncio.wait_for(websocket.receive_bytes(),timeout=1)
+                    except asyncio.TimeoutError:continue
+                    if not self._authorized(tok):break
+                    if len(data)>32768:
+                        await websocket.close(code=1009);break
                     try:
                         self._phone_audio_queue.put_nowait(
                             {"data": data, "mime_type": "audio/pcm"}
@@ -715,6 +529,9 @@ class DashboardServer:
             except WebSocketDisconnect:
                 pass
             finally:
+                self._ws_tokens.pop(websocket,None)
+                try: await websocket.close(code=4001)
+                except Exception: pass
                 asyncio.create_task(self.broadcast(
                     {"type": "sys", "text": "Phone microphone stopped."}
                 ))
@@ -733,7 +550,10 @@ class DashboardServer:
                     return JSONResponse({"error": "Unauthorized"}, status_code=401)
 
                 safe = _safe_filename(file.filename or "upload")
-                dest = self._uploads_dir / safe
+                from core import path_policy
+                self._uploads_dir.mkdir(parents=True,exist_ok=True)
+                path_policy.validate_spelling(safe,relative=True)
+                dest = path_policy.validate(self._uploads_dir / safe)
                 stem, suffix = Path(safe).stem, Path(safe).suffix
                 counter = 1
                 while dest.exists():
@@ -743,11 +563,12 @@ class DashboardServer:
                 size = 0
                 max_bytes = MAX_UPLOAD_MB * 1024 * 1024
                 try:
-                    with open(dest, "wb") as fout:
+                    with open(dest, "xb") as fout:
                         while True:
                             chunk = await file.read(65536)
                             if not chunk:
                                 break
+                            if not _auth(req):raise PermissionError('Session expired/revoked during upload')
                             size += len(chunk)
                             if size > max_bytes:
                                 fout.close()
@@ -799,10 +620,12 @@ class DashboardServer:
         async def download_file(filename: str, token: str = ""):
             # Auth via query param — browser <a download> can't send custom headers
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not self._authorized(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
-            path = self._uploads_dir / safe
+            from core.path_policy import validate
+            try: path = validate(self._uploads_dir / safe)
+            except Exception:return JSONResponse({'error':'Forbidden'},status_code=403)
             if not path.exists() or not path.is_file():
                 return JSONResponse({"error": "Not found"}, status_code=404)
             return FileResponse(str(path), filename=safe)
@@ -810,10 +633,13 @@ class DashboardServer:
         @app.websocket("/ws")
         async def ws_ep(websocket: WebSocket, token: str = ""):
             tok = token.strip()
-            if not tok or tok not in self._tokens:
+            if not self._authorized(tok):
                 await websocket.close(code=4001)
                 return
+            if len(self._ws_tokens)>=16:
+                await websocket.close(code=4008);return
             await websocket.accept()
+            self._ws_tokens[websocket]=tok
             self._clients.add(websocket)
             for entry in self._history[-50:]:
                 try:
@@ -822,63 +648,95 @@ class DashboardServer:
                     break
             try:
                 while True:
-                    data = await websocket.receive_json()
+                    if not self._authorized(tok):break
+                    try: raw = await asyncio.wait_for(websocket.receive_text(),timeout=1)
+                    except asyncio.TimeoutError:continue
+                    if not self._authorized(tok):break
+                    if len(raw)>8192:
+                        await websocket.close(code=1009);break
+                    import json
+                    data=json.loads(raw)
                     if data.get("type") == "command":
                         enc = data.get("enc", "")
                         t   = self._decrypt(tok, enc) if enc else (data.get("text") or "").strip()
                         if t:
-                            await self._command_queue.put(t)
+                            if len(t)>4096:
+                                await websocket.send_json({'type':'error','text':'Command too long'});continue
+                            try:self._command_queue.put_nowait(t)
+                            except asyncio.QueueFull:
+                                await websocket.send_json({'type':'error','text':'Command queue full'});continue
                             if self._wake_callback:
                                 self._wake_callback()
             except WebSocketDisconnect:
                 pass
             finally:
                 self._clients.discard(websocket)
+                self._ws_tokens.pop(websocket,None)
+                try: await websocket.close(code=4001)
+                except Exception: pass
 
         return app
 
     # ── serve ─────────────────────────────────────────────────────────────
 
-    async def _serve_alias(self) -> None:
-        """Second HTTPS server on PORT+1 sharing the same app and in-memory state.
-        Chrome HTTPS-upgrades any bare IP:PORT the user types, so this port also needs TLS.
-        User types IP:8001 → Chrome tries https → self-signed cert warning → accept once → done."""
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT + 1)
-        cfg = uvicorn.Config(
-            self.app, host="0.0.0.0", port=PORT + 1, log_level="warning",
-            ssl_keyfile=str(ssl_key), ssl_certfile=str(ssl_cert),
-        )
-        print(f"[Dashboard] Manual entry:  {self._ip}:{PORT + 1}  (type in browser, accept cert once)")
-        await uvicorn.Server(cfg).serve()
+    def _issue(self, token):
+        now=time.time()
+        for old in list(self._tokens):
+            if self._token_expiry.get(old,0)<=now:
+                self._tokens.discard(old);self._token_keys.pop(old,None);self._token_expiry.pop(old,None)
+        if len(self._tokens)>=64:raise ValueError('Session limit reached')
+        self._tokens.add(token);self._token_expiry[token]=now+3600
 
-    async def serve(self) -> None:
+    def _authorized(self,token):
+        return self._active and token in self._tokens and self._token_expiry.get(token,0)>time.time()
+
+    async def invalidate(self,token):
+        key=self._token_keys.pop(token,None)
+        self._tokens.discard(token);self._token_expiry.pop(token,None)
+        for ws,tok in list(self._ws_tokens.items()):
+            if tok==token:
+                self._clients.discard(ws);self._ws_tokens.pop(ws,None)
+                try:await ws.close(code=4001)
+                except Exception:pass
+        if key:
+            for device,record in list(self._device_sessions.items()):
+                if record['session_key']==key:self._device_sessions.pop(device,None)
+        if not self._tokens:
+            while not self._command_queue.empty():self._command_queue.get_nowait()
+            while not self._phone_audio_queue.empty():self._phone_audio_queue.get_nowait()
+
+    async def revoke_all(self):
+        for token in list(self._tokens):await self.invalidate(token)
+        self._device_sessions.clear();self._pending_keys.clear();self._aes_cache.clear();self._history.clear()
+
+    async def disable(self):
+        self._active=False;await self.revoke_all()
+        if self._server:self._server.should_exit=True
+
+    async def serve(self):
         if not _DEPS_OK:
-            print("[Dashboard] fastapi/uvicorn not installed — dashboard disabled.")
-            print("[Dashboard] Run:  pip install fastapi 'uvicorn[standard]' cryptography")
-            return
-
-        # Firewall setup runs in a thread — uvicorn starts immediately,
-        # no waiting for UAC dialogs or subprocess timeouts.
-        asyncio.get_event_loop().run_in_executor(None, _ensure_network_access, PORT)
-
-        # Generate the TLS pair on first run so no private key ships in the repo.
-        _ensure_certs()
-
-        use_ssl  = self._ssl_enabled()
-        ssl_key  = BASE_DIR / "config" / "certs" / "jarvis.key"
-        ssl_cert = BASE_DIR / "config" / "certs" / "jarvis.crt"
-
-        if use_ssl:
-            asyncio.create_task(self._serve_alias())
-
-        cfg = uvicorn.Config(
-            self.app, host="0.0.0.0", port=PORT, log_level="warning",
-            **({"ssl_keyfile": str(ssl_key), "ssl_certfile": str(ssl_cert)} if use_ssl else {}),
-        )
-
-        proto = "https" if use_ssl else "http"
-        print(f"[Dashboard] {proto}://{self._ip}:{PORT}")
-        print("[Dashboard] Press 'Remote Control' in JARVIS UI to get the QR code.")
-        await uvicorn.Server(cfg).serve()
+            print('[Dashboard] Optional dependencies unavailable.');return
+        print('[Dashboard] Remote access OFF. Activate from the local Remote Control button.')
+        while not self._active:await asyncio.sleep(.2)
+        if not _ensure_certs():
+            self._active=False;print('[Dashboard] TLS unavailable; remote service was not started.');return
+        import ssl
+        key=BASE_DIR/'config/certs/jarvis.key';cert=BASE_DIR/'config/certs/jarvis.crt'
+        try:
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER);context.load_cert_chain(cert,key)
+        except Exception:
+            self._active=False;print('[Dashboard] Invalid TLS key/certificate; service not started.');return
+        cfg=uvicorn.Config(self.app,host='0.0.0.0',port=PORT,log_level='warning',access_log=False,
+            ssl_keyfile=str(key),ssl_certfile=str(cert),ws_max_size=32768,limit_concurrency=32)
+        self._server=uvicorn.Server(cfg)
+        print('[Dashboard] Remote access ON with TLS. Firewall/network policy unchanged.')
+        async def expiry():
+            while self._active:
+                for token in set(self._tokens) | set(self._ws_tokens.values()):
+                    if not self._authorized(token):await self.invalidate(token)
+                await asyncio.sleep(1)
+        task=asyncio.create_task(expiry())
+        try:await self._server.serve()
+        finally:
+            task.cancel();await asyncio.gather(task,return_exceptions=True)
+            await self.disable()

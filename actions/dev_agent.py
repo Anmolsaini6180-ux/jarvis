@@ -1,3 +1,5 @@
+from core import path_policy, safe_files
+from core.execution import ExecutionResult, run_generated, propose_dependencies
 import subprocess
 import sys
 import json
@@ -14,7 +16,7 @@ def get_base_dir():
 
 BASE_DIR         = get_base_dir()
 API_CONFIG_PATH  = BASE_DIR / "config" / "api_keys.json"
-PROJECTS_DIR     = Path.home() / "Desktop" / "JarvisProjects"
+PROJECTS_DIR     = path_policy.DEFAULT_WORKSPACE / "Projects"
 MAX_FIX_ATTEMPTS = 5
 # Model choice, timeout and fallback ladder all live in core/gemini.py.
 from core import gemini
@@ -89,18 +91,9 @@ def _classify_error(output: str) -> str:
     return "none"
 
 
-def _has_error(output: str, run_command: str) -> bool:
-    
-    low = output.lower()
-
-    if "timed out" in low:
-        return False
-
-    if not output.strip():
-        return False
-
-    error_type = _classify_error(output)
-    return error_type != "none"
+def _has_error(output, run_command="") -> bool:
+    if isinstance(output, ExecutionResult): return not output.succeeded
+    return True  # legacy unstructured output cannot prove success
 
 class RateLimitError(Exception):
     pass
@@ -227,9 +220,9 @@ Code for {file_path}:"""
         response = model.generate_content(prompt)
         code = _strip_fences(response.text)
 
-        full_path = project_dir / file_path
+        full_path = path_policy.project_path(project_dir, file_path)
         full_path.parent.mkdir(parents=True, exist_ok=True)
-        full_path.write_text(code, encoding="utf-8")
+        safe_files.write(full_path, code, overwrite=False, validator=lambda p: path_policy.project_path(project_dir, str(Path(p).relative_to(project_dir))))
 
         print(f"[DevAgent] ✅ Written: {file_path} ({len(code)} chars)")
         return code
@@ -240,39 +233,7 @@ Code for {file_path}:"""
         raise
 
 def _install_dependencies(dependencies: list[str], project_dir: Path) -> str:
-    if not dependencies:
-        return "No external dependencies."
-
-    to_install = []
-    for dep in dependencies:
-        pkg_name = re.split(r"[>=<!]", dep)[0].strip()
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "show", pkg_name],
-            capture_output=True, text=True
-        )
-        if result.returncode != 0:
-            to_install.append(dep)
-        else:
-            print(f"[DevAgent] ✓ Already installed: {pkg_name}")
-
-    if not to_install:
-        return f"All dependencies already installed: {', '.join(dependencies)}"
-
-    print(f"[DevAgent] 📦 Installing: {to_install}")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install"] + to_install,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=120, cwd=str(project_dir)
-        )
-        if result.returncode == 0:
-            return f"Installed: {', '.join(to_install)}"
-        return f"Install warning (non-fatal): {result.stderr[:200]}"
-    except subprocess.TimeoutExpired:
-        return "Dependency install timed out (non-fatal)."
-    except Exception as e:
-        return f"Install error (non-fatal): {e}"
+    return propose_dependencies(dependencies, project_dir)
 
 def _open_vscode(project_dir: Path) -> bool:
     vscode_candidates = [
@@ -284,7 +245,7 @@ def _open_vscode(project_dir: Path) -> bool:
         try:
             subprocess.Popen(
                 [cmd, str(project_dir)],
-                shell=True,
+                shell=False,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
@@ -295,60 +256,11 @@ def _open_vscode(project_dir: Path) -> bool:
             continue
     return False
 
-def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> str:
-    print(f"[DevAgent] 🚀 Running: {run_command}")
-    try:
-        parts = run_command.split()
-        if parts[0].lower() == "python":
-            parts[0] = sys.executable
-
-        result = subprocess.run(
-            parts,
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout,
-            cwd=str(project_dir)
-        )
-
-        stdout = result.stdout.strip()
-        stderr = result.stderr.strip()
-
-        combined_parts = []
-        if stdout:
-            combined_parts.append(f"STDOUT:\n{stdout}")
-        if stderr:
-            combined_parts.append(f"STDERR:\n{stderr}")
-
-        return "\n\n".join(combined_parts) if combined_parts else "Ran with no output."
-
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s — long-running app (server/GUI) is likely working."
-    except FileNotFoundError as e:
-        return f"Command not found: {e}"
-    except Exception as e:
-        return f"Run error: {e}"
+def _run_project(run_command: str, project_dir: Path, timeout: int = 30) -> ExecutionResult:
+    return run_generated(run_command, project_dir, timeout=timeout)
 
 def _try_auto_install(error_output: str, project_dir: Path) -> bool:
-    """If there is a ModuleNotFoundError, tries to auto-install the missing package."""
-    pattern = re.compile(
-        r"No module named ['\"]([a-zA-Z0-9_\-\.]+)['\"]", re.IGNORECASE
-    )
-    match = pattern.search(error_output)
-    if not match:
-        return False
-
-    pkg = match.group(1).replace("_", "-").split(".")[0]
-    print(f"[DevAgent] 🔧 Auto-installing missing package: {pkg}")
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", pkg],
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=60, cwd=str(project_dir)
-        )
-        return result.returncode == 0
-    except Exception:
-        return False
+    return False  # Never infer a distribution name from an import name.
 
 def _fix_files(
     error_output: str,
@@ -425,9 +337,9 @@ Fixed code for {fix_path}:"""
             response = model.generate_content(prompt)
             fixed = _strip_fences(response.text)
 
-            full_path = project_dir / fix_path
+            full_path = path_policy.project_path(project_dir, fix_path)
             full_path.parent.mkdir(parents=True, exist_ok=True)
-            full_path.write_text(fixed, encoding="utf-8")
+            safe_files.write(full_path, fixed, validator=lambda p: path_policy.project_path(project_dir, str(Path(p).relative_to(project_dir))))
 
             updated_codes[fix_path] = fixed
             print(f"[DevAgent] 🔧 Fixed: {fix_path}")
@@ -468,19 +380,24 @@ def _build_project(
     proj_name    = project_name or plan.get("project_name", "jarvis_project")
     proj_name    = re.sub(r"[^\w\-]", "_", proj_name)
     project_dir  = PROJECTS_DIR / proj_name
-    project_dir.mkdir(parents=True, exist_ok=True)
+    path_policy.validate(project_dir)
+    project_dir.mkdir(parents=True, exist_ok=False)
 
     files        = plan.get("files", [])
     entry_point  = plan.get("entry_point", "main.py")
     run_command  = plan.get("run_command", f"python {entry_point}")
     dependencies = plan.get("dependencies", [])
 
+    if not isinstance(files, list) or not files or len(files)>100:
+        raise ValueError('Plan must contain 1–100 files')
+    for item in files: path_policy.project_path(project_dir,item['path'])
+    path_policy.project_path(project_dir,entry_point)
     log(f"Project: {proj_name} | Files: {len(files)} | Entry: {entry_point}")
 
     def _dep_sort_key(fi: dict) -> int:
         return len(fi.get("imports", []))
 
-    sorted_files = sorted(files, key=_dep_sort_key)
+    sorted_files = _dependency_order(files)
 
     file_codes: dict[str, str] = {}
 
@@ -530,11 +447,15 @@ def _build_project(
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
         last_output = _run_project(run_command, project_dir, timeout)
-        log(f"Output preview: {last_output[:150]}")
+        log(f"Run status: {last_output.status}, exit={last_output.exit_code}")
+        if last_output.status in {"unavailable", "timed_out", "cancelled"}:
+            return f"Project generated at {project_dir}. Execution {last_output.status}; functionally unverified.\n{last_output}"
+        result = last_output
+        last_output = str(result)
 
-        if not _has_error(last_output, run_command):
+        if result.succeeded:
             msg = (
-                f"Project '{proj_name}' is working, sir. "
+                f"Project '{proj_name}' exited successfully; functional behavior unverified. "
                 f"Built in {attempt} attempt{'s' if attempt > 1 else ''}. "
                 f"Saved to: {project_dir}"
             )
@@ -637,3 +558,20 @@ TOOL = {
     },
     "handler": dev_agent,
 }
+
+
+def _dependency_order(files):
+    """Topological order of project modules; reject cycles and duplicate paths."""
+    lookup={f['path']:f for f in files}
+    if len(lookup)!=len(files):raise ValueError('Duplicate project file paths')
+    module={p.removesuffix('.py').replace('/','.'):p for p in lookup}
+    ordered=[];active=set();done=set()
+    def visit(p):
+        if p in active:raise ValueError('Cyclic project dependency: '+p)
+        if p in done:return
+        active.add(p)
+        for name in lookup[p].get('imports',[]):
+            if name in module:visit(module[name])
+        active.remove(p);done.add(p);ordered.append(lookup[p])
+    for p in lookup:visit(p)
+    return ordered

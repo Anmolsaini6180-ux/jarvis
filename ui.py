@@ -1211,6 +1211,9 @@ class FileDropZone(QWidget):
             self._set_file(path)
 
     def _set_file(self, path: str):
+        from core.path_policy import grant
+        try: grant(path, directory=False)
+        except (ValueError, PermissionError, OSError): return
         self._current_file = path
         self._canvas.update()
         self.file_selected.emit(path)

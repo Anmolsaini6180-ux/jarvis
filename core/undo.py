@@ -111,6 +111,8 @@ def undo_last() -> str:
     except Exception as e:
         return f"Could not undo '{entry.label}': {e}"
 
+    if detail.lower().startswith(('conflict', 'could not', 'undo conflict')):
+        return f"Undo not completed: {entry.label}. {detail}"
     return f"Undone: {entry.label}." + (f" {detail}" if detail else "")
 
 

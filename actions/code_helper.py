@@ -1,3 +1,5 @@
+from core import path_policy, safe_files
+from core.execution import ExecutionResult, run_generated
 import subprocess
 import sys
 import json
@@ -13,7 +15,7 @@ def get_base_dir():
 
 BASE_DIR           = get_base_dir()
 API_CONFIG_PATH    = BASE_DIR / "config" / "api_keys.json"
-DESKTOP            = Path.home() / "Desktop"
+DESKTOP            = path_policy.DEFAULT_WORKSPACE / "Code"
 MAX_BUILD_ATTEMPTS = 3
 # Model choice lives in core/gemini.py, and so does the timeout and the
 # fallback ladder. Writing a model name here is what left this file hanging
@@ -58,7 +60,7 @@ def _resolve_save_path(output_path: str, language: str) -> Path:
     }
     if output_path:
         p = Path(output_path)
-        return p if p.is_absolute() else DESKTOP / p
+        return path_policy.validate(p if p.is_absolute() else DESKTOP / p)
     ext = ext_map.get((language or "python").lower(), ".py")
     return DESKTOP / f"jarvis_code{ext}"
 
@@ -66,7 +68,7 @@ def _resolve_save_path(output_path: str, language: str) -> Path:
 def _read_file(file_path: str) -> tuple[str, str]:
     if not file_path:
         return "", "No file path provided."
-    p = Path(file_path)
+    p = path_policy.validate(file_path)
     if not p.exists():
         return "", f"File not found: {file_path}"
     try:
@@ -76,12 +78,8 @@ def _read_file(file_path: str) -> tuple[str, str]:
 
 
 def _save_file(path: Path, content: str) -> str:
-    try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        return f"Saved to: {path}"
-    except Exception as e:
-        return f"Could not save: {e}"
+    safe_files.write(path, content)
+    return f"Saved atomically with recovery: {path}"
 
 
 def _preview(code: str, lines: int = 10) -> str:
@@ -91,10 +89,8 @@ def _preview(code: str, lines: int = 10) -> str:
     return preview + suffix
 
 
-def _has_error(output: str) -> bool:
-    error_signals = ["error", "exception", "traceback", "syntaxerror",
-                     "nameerror", "typeerror", "stderr", "failed", "crash"]
-    return any(s in output.lower() for s in error_signals)
+def _has_error(output) -> bool:
+    return not isinstance(output, ExecutionResult) or not output.succeeded
 
 
 def _take_screenshot() -> Path | None:
@@ -208,40 +204,14 @@ Fixed code:"""
     return _clean_code(response.text)
 
 
-def _run_file(path: Path, args: list, timeout: int) -> str:
-    interpreters = {
-        ".py":  [sys.executable],
-        ".js":  ["node"],
-        ".ts":  ["ts-node"],
-        ".sh":  ["bash"],
-        ".ps1": ["powershell", "-File"],
-        ".rb":  ["ruby"],
-        ".php": ["php"],
-    }
-    interp = interpreters.get(path.suffix.lower())
-    if not interp:
-        return f"No interpreter for {path.suffix}."
-
+def _run_file(path: Path, args: list, timeout: int) -> ExecutionResult:
     try:
-        result = subprocess.run(
-            interp + [str(path)] + (args or []),
-            capture_output=True, text=True,
-            encoding="utf-8", errors="replace",
-            timeout=timeout, cwd=str(path.parent)
-        )
-        output = result.stdout.strip()
-        error  = result.stderr.strip()
-        parts  = []
-        if output: parts.append(f"Output:\n{output}")
-        if error:  parts.append(f"Stderr:\n{error}")
-        return "\n\n".join(parts) if parts else "Executed with no output."
-
-    except subprocess.TimeoutExpired:
-        return f"Timed out after {timeout}s."
-    except FileNotFoundError:
-        return f"Interpreter not found: {interp[0]}."
-    except Exception as e:
-        return f"Execution error: {e}"
+        path = path_policy.validate(path)
+        if not isinstance(args,list) or not all(isinstance(a,str) for a in args): raise ValueError('args must be an array of strings')
+        interpreter={'.py':['python'],'.js':['node'],'.ts':['ts-node'],'.sh':['bash'],'.rb':['ruby'],'.php':['php']}.get(path.suffix.lower())
+        if not interpreter:return ExecutionResult('unavailable',stderr='No isolated interpreter for this file type')
+        return run_generated(interpreter+[path.name]+args,path.parent,timeout)
+    except Exception as e:return ExecutionResult('failed',stderr=str(e))
 
 
 def _build(description, language, output_path, args, timeout, speak=None, player=None) -> str:
@@ -269,10 +239,12 @@ def _build(description, language, output_path, args, timeout, speak=None, player
 
         last_output = _run_file(path, args, timeout)
 
+        if last_output.status in {'unavailable','timed_out','cancelled'}:
+            return f"Generated at {path}; execution {last_output.status}; functionally unverified.\n{last_output}"
         if not _has_error(last_output):
             msg = (
                 f"Build complete, sir. "
-                f"The code is working after {attempt} attempt{'s' if attempt > 1 else ''}. "
+                f"The code exited successfully; functional behavior unverified after {attempt} attempt{'s' if attempt > 1 else ''}. "
                 f"Saved to {path}."
             )
             if speak: speak(msg)
@@ -283,7 +255,7 @@ def _build(description, language, output_path, args, timeout, speak=None, player
             player.write_log(f"[Code] Fixing (attempt {attempt})...")
 
         try:
-            code = _fix_code(code, last_output, description)
+            code = _fix_code(code, str(last_output), description)
             _save_file(path, code)
         except Exception as e:
             msg = f"Could not fix code on attempt {attempt}: {e}"
@@ -292,7 +264,7 @@ def _build(description, language, output_path, args, timeout, speak=None, player
 
     msg = (
         f"I was unable to build a working version after {MAX_BUILD_ATTEMPTS} attempts, sir. "
-        f"The last error was: {last_output[:200]}"
+        f"The last error was: {str(last_output)[:200]}"
     )
     if speak: speak(msg)
     return f"{msg}\n\nLast code saved to: {path}"
@@ -377,7 +349,7 @@ Explanation:"""
 def _run_action(file_path, args, timeout, player) -> str:
     if not file_path:
         return "Please provide a file path to run, sir."
-    p = Path(file_path)
+    p = path_policy.validate(file_path)
     if not p.exists():
         return f"File not found: {file_path}"
     if player:
@@ -501,15 +473,7 @@ Be specific and actionable. If you see an error message, quote it exactly."""
         except Exception:
             pass
 
-        if file_path and file_content:
-
-            code_match = re.search(r"```[a-zA-Z]*\n(.*?)```", analysis, re.DOTALL)
-            if code_match:
-                fixed_code = code_match.group(1).strip()
-                save_path  = Path(file_path)
-                _save_file(save_path, fixed_code)
-                analysis += f"\n\n✅ Fixed code has been saved to: {file_path}"
-                print(f"[Code] ✅ Fixed code saved: {file_path}")
+        analysis += "\n\nSuggested changes only; screenshot code was not applied. Use an explicit edit request after review."
 
         return analysis
 

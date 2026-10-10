@@ -140,7 +140,8 @@
     <div class="pill" id="pill"><span class="dot"></span><span id="st">Connecting</span></div>
     <div class="enc-badge" id="enc">AES-256</div>
     <div class="spacer"></div>
-    <div class="url">__IP__:__PORT__</div>
+    <div class="url">TLS · __IP__:__PORT__</div>
+    <button class="btn" onclick="doLogout()">LOGOUT</button>
   </header>
   <main id="feed"></main>
   <footer>
@@ -161,10 +162,18 @@
       location.replace('/login');
     }
 
+    async function doLogout() {
+      await _authFetch('/api/logout', {method:'POST'});
+      sessionStorage.removeItem('jarvis_token'); sessionStorage.removeItem('jarvis_key');
+      localStorage.removeItem('jarvis_device_token'); location.replace('/login');
+    }
     function _authHeader() { return { 'Authorization': `Bearer ${_authToken}` }; }
     function _authFetch(url, opts = {}) {
       opts.headers = Object.assign({}, opts.headers, _authHeader());
-      return fetch(url, opts);
+      return fetch(url, opts).then(response => {
+        if (response.status === 401) { sessionStorage.clear(); location.replace('/login'); }
+        return response;
+      });
     }
 
     // ── AES-256-CBC encryption (CryptoJS) ────────────────────────────────────

@@ -1,3 +1,4 @@
+from core import path_policy, safe_files
 #desktop.py
 import os
 import sys
@@ -36,122 +37,28 @@ def _get_desktop() -> Path:
     return Path.home() / "Desktop"
 
 def _build_sandbox() -> dict:
-    import time
-
-    safe_builtins = {
-        "print": print,
-        "len": len, "str": str, "int": int, "float": float,
-        "bool": bool, "list": list, "dict": dict, "tuple": tuple,
-        "range": range, "enumerate": enumerate, "sorted": sorted,
-        "isinstance": isinstance, "hasattr": hasattr, "getattr": getattr,
-        "max": max, "min": min, "sum": sum, "abs": abs,
-        "zip": zip, "map": map, "filter": filter,
-    }
-
-    sandbox = {
-        "__builtins__": safe_builtins,
-        "Path": Path,
-        "time": time,
-        "shutil": type("shutil", (), {
-            "copy2":      shutil.copy2,
-            "copytree":   shutil.copytree,
-            "disk_usage": shutil.disk_usage,
-        })(),
-        "os_path": os.path,  
-    }
-
-    if _PYAUTOGUI:
-        sandbox["pyautogui"] = pyautogui
-
-    if _OS == "Windows":
-        try:
-            import ctypes
-            import winreg
-            sandbox["ctypes"] = ctypes
-            sandbox["winreg"] = type("winreg", (), {
-                # Sadece okuma
-                "OpenKey":      winreg.OpenKey,
-                "QueryValueEx": winreg.QueryValueEx,
-                "HKEY_CURRENT_USER": winreg.HKEY_CURRENT_USER,
-            })()
-        except ImportError:
-            pass
-
-    return sandbox
+    return {}  # Compatibility shim; no Python execution capability.
 
 
 def _execute_generated_code(code: str, player=None) -> str:
-    if not code or code.strip() == "UNSAFE":
-        return "This action cannot be performed safely."
-
-    # Kod temizleme
-    if code.startswith("```"):
-        lines = code.split("\n")
-        code  = "\n".join(lines[1:-1]).strip()
-
-    sandbox      = _build_sandbox()
-    output_lines = []
-    sandbox["__builtins__"]["print"] = lambda *a: output_lines.append(" ".join(str(x) for x in a))
-
     try:
-        exec(compile(code, "<jarvis_desktop>", "exec"), sandbox)
-        return "\n".join(output_lines) if output_lines else "Done."
-    except Exception as e:
-        print(f"[Desktop] Exec error: {e}\nCode:\n{code[:300]}")
-        return f"Execution error: {e}"
+        plan=json.loads(code)
+        if not isinstance(plan,dict) or set(plan)!={'action','parameters'}: raise ValueError('Typed plan required')
+        from actions.file_controller import file_controller, TOOL as FILE_TOOL
+        from core.validation import validate_arguments
+        if plan['action'] != 'file_controller': raise ValueError('Only the typed file interface is supported')
+        validate_arguments(plan['parameters'], FILE_TOOL['parameters'])
+        return file_controller(plan['parameters'],player=player)
+    except Exception as e: return f"Desktop plan rejected: {e}. No generated Python was executed."
 
 
 def _ask_gemini_for_desktop_action(task: str) -> str:
-
-    from google import genai as _genai
-
-    desktop = str(_get_desktop())
-
-    os_specific = ""
-    if _OS == "Windows":
-        os_specific = "- ctypes (Windows API calls, read-only)\n- winreg (registry READ only)"
-    elif _OS == "Darwin":
-        os_specific = "- subprocess is NOT available; use pyautogui or Path only"
-    else:
-        os_specific = "- subprocess is NOT available; use pyautogui or Path only"
-
-    prompt = f"""You are a desktop automation assistant.
-Current OS: {_OS}
-Desktop path: {desktop}
-
-Generate safe Python code to accomplish the task below.
-Allowed modules ONLY:
-- pyautogui (mouse, keyboard — if needed)
-- pathlib.Path (file/folder inspection only, no deletion)
-- shutil.copy2, shutil.copytree, shutil.disk_usage (NO move, NO rmtree)
-- os_path (os.path equivalent, read-only)
-- time.sleep
-{os_specific}
-
-Hard rules:
-- NO file deletion (no unlink, no rmtree, no remove)
-- NO subprocess calls
-- NO exec() or eval() inside the code
-- NO import statements (modules are pre-injected)
-- NO file write operations except explicitly requested
-- If task cannot be done safely with these tools, output exactly: UNSAFE
-
-Output ONLY the Python code. No explanation, no markdown, no backticks.
-
-Task: {task}"""
-
-    try:
-        from core import gemini
-        response = gemini.call(prompt, tier=gemini.SMART, timeout_ms=30_000)
-        if response is None:
-            return "ERROR: every Gemini model on the ladder failed"
-        code = (response.text or "").strip()
-        if code.startswith("```"):
-            lines = code.split("\n")
-            code  = "\n".join(lines[1:-1]).strip()
-        return code
-    except Exception as e:
-        return f"ERROR: {e}"
+    from core import gemini
+    from actions.file_controller import TOOL
+    prompt=('Return ONLY JSON {"action":"file_controller","parameters":{...}} for this task. '
+            'No Python. Use only this typed schema: '+json.dumps(TOOL['parameters'])+'\nTask: '+task)
+    response=gemini.call(prompt,tier=gemini.SMART,timeout_ms=30_000)
+    return (response.text or '').strip() if response else '{}'
 
 def set_wallpaper(image_path: str) -> str:
     path = Path(image_path).expanduser().resolve()
@@ -307,7 +214,7 @@ _SKIP_EXTENSIONS = {
 
 
 def organize_desktop(mode: str = "by_type") -> str:
-    desktop       = _get_desktop()
+    desktop       = path_policy.validate(_get_desktop())
     skip_exts     = _SKIP_EXTENSIONS.get(_OS, set())
     moved, skipped = [], []
 
@@ -336,7 +243,7 @@ def organize_desktop(mode: str = "by_type") -> str:
             skipped.append(item.name)
             continue
 
-        shutil.move(str(item), str(new_path))
+        safe_files.move(item,new_path)
         moved.append(f"{item.name} → {folder_name}/")
 
     result = f"Desktop organized ({mode}): {len(moved)} files moved."
@@ -350,7 +257,7 @@ def organize_desktop(mode: str = "by_type") -> str:
 
 
 def list_desktop() -> str:
-    desktop = _get_desktop()
+    desktop = path_policy.validate(_get_desktop())
     items   = []
     for item in sorted(desktop.iterdir()):
         if item.name.startswith("."):
@@ -375,7 +282,7 @@ def list_desktop() -> str:
 
 
 def clean_desktop() -> str:
-    desktop     = _get_desktop()
+    desktop     = path_policy.validate(_get_desktop())
     skip_exts   = _SKIP_EXTENSIONS.get(_OS, set())
     today       = datetime.now().strftime("%Y-%m-%d")
     archive_dir = desktop / f"Desktop Archive {today}"
@@ -389,14 +296,14 @@ def clean_desktop() -> str:
             continue
         new_path = archive_dir / item.name
         if not new_path.exists():
-            shutil.move(str(item), str(new_path))
+            safe_files.move(item,new_path)
             moved += 1
 
     return f"Desktop cleaned: {moved} files archived to '{archive_dir.name}'."
 
 
 def get_desktop_stats() -> str:
-    desktop    = _get_desktop()
+    desktop    = path_policy.validate(_get_desktop())
     files      = [i for i in desktop.iterdir() if i.is_file()]
     folders    = [i for i in desktop.iterdir() if i.is_dir()]
     total_size = sum(f.stat().st_size for f in files if f.exists())

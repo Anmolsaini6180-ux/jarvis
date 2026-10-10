@@ -1,3 +1,4 @@
+from core import path_policy, safe_files
 import os
 import shutil
 import platform
@@ -21,33 +22,24 @@ _UNDO_CONTENT_LIMIT = 1_000_000
 
 
 def _undo_move(src: Path, dst: Path):
-    """Reverse of a move: put it back where it came from."""
-    def _fn():
-        if not dst.exists():
-            return f"'{dst.name}' is no longer there — nothing moved back."
-        src.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(dst), str(src))
-        return f"'{src.name}' is back in {src.parent.name}/."
-    return _fn
+    expected = safe_files.fingerprint(dst)
+    def run():
+        _validate(src);_validate(dst)
+        if src.exists() or safe_files.fingerprint(dst) != expected:
+            raise safe_files.UndoConflict('Newer changes preserved')
+        shutil.move(str(dst),str(src));return 'Moved back.'
+    return run
 
 
 def _undo_create(target: Path):
-    """Reverse of a create: remove what we made — and only if we still made it.
-
-    Deliberately refuses to touch a directory that has since been filled: the
-    undo for 'create a folder' is not 'delete whatever ended up in it'."""
-    def _fn():
-        if not target.exists():
-            return f"'{target.name}' is already gone."
-        if target.is_dir():
-            if any(target.iterdir()):
-                return (f"'{target.name}' is not empty any more — "
-                        f"leaving it alone rather than deleting your files.")
-            target.rmdir()
-        else:
-            target.unlink()
-        return f"Removed '{target.name}'."
-    return _fn
+    expected = safe_files.fingerprint(target)
+    def run():
+        _validate(target)
+        if safe_files.fingerprint(target) != expected: raise safe_files.UndoConflict('Newer changes preserved')
+        if target.is_dir(): target.rmdir()
+        elif target.exists(): target.unlink()
+        return 'Removed unchanged created item.'
+    return run
 
 
 def _undo_write(target: Path, previous: str | None):
@@ -73,6 +65,8 @@ def _restore_from_trash(original: Path) -> str:
     back out again is shell work and only reliable on Windows, where pywin32 is
     already a dependency. Everywhere else this says where the file is instead of
     pretending it failed — the file is not lost either way."""
+    if original.exists():
+        return "Undo conflict: newer item exists; original remains in Trash."
     if _OS == "Windows":
         try:
             import win32com.client
@@ -90,20 +84,17 @@ def _restore_from_trash(original: Path) -> str:
             f"automatically, but it is there and can be restored by hand.")
 
 
-_SAFE_ROOTS: list[Path] = [
-    Path.home(),
-]
+_SAFE_ROOTS = None  # dynamic UI-approved capabilities, not the entire home directory
 
 def _is_safe_path(target: Path) -> bool:
-    """Is the given path inside _SAFE_ROOTS? If not, reject the operation."""
     try:
-        resolved = target.resolve()
-        return any(
-            resolved == root.resolve() or resolved.is_relative_to(root.resolve())
-            for root in _SAFE_ROOTS
-        )
-    except Exception:
+        path_policy.validate(target, roots=_SAFE_ROOTS)
+        return True
+    except (ValueError, PermissionError, OSError):
         return False
+
+def _validate(target):
+    return path_policy.validate(target, roots=_SAFE_ROOTS)
 
 def _get_desktop() -> Path:
     if _OS == "Linux":
@@ -228,24 +219,10 @@ def list_files(path: str = "desktop", show_hidden: bool = False) -> str:
 
 def create_file(path: str, name: str = "", content: str = "") -> str:
     try:
-        base   = _resolve_path(path)
-        target = (base / name) if name else base
-        if not _is_safe_path(target):
-            return f"Access denied: {target}"
-        target.parent.mkdir(parents=True, exist_ok=True)
-        existed = target.exists()
-        previous = None
-        if existed:
-            try:
-                previous = target.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                previous = None
-        target.write_text(content, encoding="utf-8")
-        push_undo(f"created {target.name}",
-                  _undo_write(target, previous) if existed else _undo_create(target))
+        target = _resolve_path(path) / name if name else _resolve_path(path)
+        safe_files.write(target, content, overwrite=False, validator=_validate)
         return f"File created: {target.name}"
-    except Exception as e:
-        return f"Could not create file: {e}"
+    except Exception as e: return f"Could not create file: {e}"
 
 
 def create_folder(path: str, name: str = "") -> str:
@@ -283,6 +260,8 @@ def delete_file(path: str, name: str = "") -> str:
         if target.resolve() in {p.resolve() for p in protected}:
             return f"Protected directory, cannot delete: {target.name}"
 
+        _validate(target)
+        if target.is_dir(): path_policy.validate_tree(target)
         original = target.resolve()
         result   = _safe_trash(target)
         if result.startswith("Moved to Trash"):
@@ -298,99 +277,34 @@ def delete_file(path: str, name: str = "") -> str:
 
 def move_file(path: str, name: str = "", destination: str = "") -> str:
     try:
-        base   = _resolve_path(path)
-        src    = (base / name) if name else base
-        dst    = _resolve_path(destination) if destination else None
-
-        if not src.exists():
-            return f"Source not found: {src.name}"
-        if dst is None:
-            return "No destination specified."
-        if not _is_safe_path(src):
-            return f"Access denied (source): {src}"
-        if not _is_safe_path(dst):
-            return f"Access denied (destination): {dst}"
-
-        if dst.is_dir():
-            dst = dst / src.name
-
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        origin = src.resolve()
-        shutil.move(str(src), str(dst))
-        push_undo(f"moved {origin.name} to {dst.parent.name}/",
-                  _undo_move(origin, dst.resolve()))
-        return f"Moved: {src.name} → {dst.parent.name}/"
-
-    except Exception as e:
-        return f"Could not move: {e}"
+        if not destination: return "No destination specified."
+        src = _resolve_path(path) / name if name else _resolve_path(path)
+        dst = _resolve_path(destination)
+        if dst.is_dir(): dst = dst / src.name
+        safe_files.move(src,dst,validator=_validate)
+        return f"Moved: {src.name} → {dst}"
+    except Exception as e: return f"Could not move: {e}"
 
 
 def copy_file(path: str, name: str = "", destination: str = "") -> str:
     try:
-        base = _resolve_path(path)
-        src  = (base / name) if name else base
-        dst  = _resolve_path(destination) if destination else None
-
-        if not src.exists():
-            return f"Source not found: {src.name}"
-        if dst is None:
-            return "No destination specified."
-        if not _is_safe_path(src):
-            return f"Access denied (source): {src}"
-        if not _is_safe_path(dst):
-            return f"Access denied (destination): {dst}"
-
-        if dst.is_dir():
-            dst = dst / src.name
-
-        dst.parent.mkdir(parents=True, exist_ok=True)
-
-        if src.is_dir():
-            shutil.copytree(str(src), str(dst))
-        else:
-            shutil.copy2(str(src), str(dst))
-
-        # The undo for a copy is deleting the copy — never the original.
-        _copy = dst.resolve()
-        def _undo_copy():
-            if not _copy.exists():
-                return f"The copy '{_copy.name}' is already gone."
-            if _copy.is_dir():
-                shutil.rmtree(_copy)
-            else:
-                _copy.unlink()
-            return f"Removed the copy in {_copy.parent.name}/."
-        push_undo(f"copied {src.name} to {dst.parent.name}/", _undo_copy)
-
-        return f"Copied: {src.name} → {dst.parent.name}/"
-
-    except Exception as e:
-        return f"Could not copy: {e}"
+        if not destination: return "No destination specified."
+        src = _resolve_path(path) / name if name else _resolve_path(path)
+        dst = _resolve_path(destination)
+        if dst.is_dir(): dst = dst / src.name
+        safe_files.copy(src,dst,validator=_validate)
+        return f"Copied: {src.name} → {dst}"
+    except Exception as e: return f"Could not copy: {e}"
 
 
 def rename_file(path: str, name: str = "", new_name: str = "") -> str:
     try:
-        base     = _resolve_path(path)
-        target   = (base / name) if name else base
-        if not _is_safe_path(target):
-            return f"Access denied: {target}"
-        if not target.exists():
-            return f"Not found: {target.name}"
-        if not new_name:
-            return "No new name provided."
-
-        new_path = target.parent / new_name
-        if new_path.exists():
-            return f"A file named '{new_name}' already exists here."
-
-        old_path = target.resolve()
-        target.rename(new_path)
-        push_undo(f"renamed {old_path.name} to {new_name}",
-                  _undo_move(old_path, new_path.resolve()))
+        path_policy.validate_spelling(new_name,relative=True)
+        if '/' in new_name or '\\' in new_name or new_name == '.': raise ValueError('Rename requires a basename only')
+        target = _resolve_path(path) / name if name else _resolve_path(path)
+        safe_files.move(target,target.parent/new_name,validator=_validate)
         return f"Renamed: {target.name} → {new_name}"
-
-    except Exception as e:
-        return f"Could not rename: {e}"
+    except Exception as e: return f"Could not rename: {e}"
 
 
 def read_file(path: str, name: str = "", max_chars: int = 4000) -> str:
@@ -413,41 +327,12 @@ def read_file(path: str, name: str = "", max_chars: int = 4000) -> str:
         return f"Could not read file: {e}"
 
 
-def write_file(path: str, name: str = "", content: str = "",
-               append: bool = False) -> str:
+def write_file(path: str, name: str = "", content: str = "", append: bool = False) -> str:
     try:
-        base   = _resolve_path(path)
-        target = (base / name) if name else base
-        if not _is_safe_path(target):
-            return f"Access denied: {target}"
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        # Snapshot before writing. None means "did not exist", which is a
-        # different undo (delete it) from "existed and had this in it".
-        previous: str | None = None
-        undoable = True
-        if target.exists():
-            try:
-                if target.stat().st_size > _UNDO_CONTENT_LIMIT:
-                    undoable = False       # too large to hold in memory
-                else:
-                    previous = target.read_text(encoding="utf-8", errors="ignore")
-            except Exception:
-                undoable = False           # binary, locked, unreadable
-
-        mode = "a" if append else "w"
-        with open(target, mode, encoding="utf-8") as f:
-            f.write(content)
-
-        action = "Appended to" if append else "Written to"
-        if undoable:
-            push_undo(f"wrote to {target.name}", _undo_write(target, previous))
-            return f"{action}: {target.name}"
-        return (f"{action}: {target.name}. "
-                f"(Too large to keep a copy of the old contents, so this one "
-                f"cannot be undone.)")
-    except Exception as e:
-        return f"Could not write file: {e}"
+        target = _resolve_path(path) / name if name else _resolve_path(path)
+        safe_files.write(target,content,append=append,validator=_validate)
+        return f"Written atomically with recovery: {target.name}"
+    except Exception as e: return f"Could not write file: {e}"
 
 
 def find_files(name: str = "", extension: str = "",
@@ -469,7 +354,7 @@ def find_files(name: str = "", extension: str = "",
                 if dir_count > max_dirs:
                     break
                 continue
-            if not item.is_file():
+            if not item.is_file() or not _is_safe_path(item):
                 continue
             if extension and item.suffix.lower() != extension.lower():
                 continue
@@ -501,7 +386,7 @@ def get_largest_files(path: str = "downloads", count: int = 10) -> str:
 
         files = []
         for item in search_path.rglob("*"):
-            if item.is_file():
+            if item.is_file() and _is_safe_path(item):
                 try:
                     files.append((item.stat().st_size, item))
                 except Exception:
@@ -550,7 +435,7 @@ def organize_desktop() -> str:
                       ".cpp", ".java", ".cs", ".go", ".rs", ".sh"},
     }
 
-    desktop = _get_desktop()
+    desktop = _validate(_get_desktop())
     moved, skipped = [], []
     journal: list[tuple[Path, Path]] = []   # (where it was, where it went)
 
@@ -577,35 +462,9 @@ def organize_desktop() -> str:
                 continue
 
             origin = item.resolve()
-            shutil.move(str(item), str(new_path))
+            safe_files.move(item, new_path, validator=_validate)
             journal.append((origin, new_path.resolve()))
             moved.append(f"{item.name} → {target_dir.name}/")
-
-        # One command, dozens of moves — so one undo that reverses all of them.
-        # Without this, "organize my desktop" is the single least reversible
-        # thing the assistant can do to a person's files, and it was completely
-        # ungated.
-        if journal:
-            def _undo_organize(entries=tuple(journal)):
-                restored = 0
-                for origin, moved_to in entries:
-                    try:
-                        if moved_to.exists():
-                            origin.parent.mkdir(parents=True, exist_ok=True)
-                            shutil.move(str(moved_to), str(origin))
-                            restored += 1
-                    except Exception as e:
-                        print(f"[file] undo organize: {moved_to.name}: {e}")
-                # Clear away the folders we created, but only while they are
-                # empty — anything the user put in since stays.
-                for folder in {m.parent for _o, m in entries}:
-                    try:
-                        if folder.exists() and folder.is_dir() and not any(folder.iterdir()):
-                            folder.rmdir()
-                    except Exception:
-                        pass
-                return f"{restored} file(s) put back on the desktop."
-            push_undo(f"organized the desktop ({len(journal)} files)", _undo_organize)
 
         result = f"Desktop organized: {len(moved)} files moved."
         if moved:
@@ -752,6 +611,8 @@ TOOL = {
                 "type": "STRING",
                 "description": "File name to search for"
             },
+            "append": {"type": "BOOLEAN", "description": "Append instead of replace"},
+            "max_results": {"type": "INTEGER"},
             "extension": {
                 "type": "STRING",
                 "description": "File extension to search (e.g. .pdf)"

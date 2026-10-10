@@ -94,6 +94,8 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
                 f"not available, so I have not done it.")
 
     with _lock:
+        if _pending and time.monotonic() - _pending.at <= TIMEOUT_SECONDS:
+            return f"[CONFIRMATION_BUSY] Resolve the pending '{_pending.title}' first. Nothing new was queued."
         _pending = _Pending(key=key, title=title, detail=detail,
                             run=run, at=time.monotonic())
 

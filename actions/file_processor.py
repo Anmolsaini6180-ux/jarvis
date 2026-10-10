@@ -1,3 +1,5 @@
+from core import path_policy, safe_files
+from core.archives import extract_bounded
 """
 file_processor.py — JARVIS Universal File Processor
 
@@ -113,7 +115,7 @@ def _process_image(path: Path, action: str, params: dict, speak=None) -> str:
 
             if len(result) > 500 and params.get("save", True):
                 out = _output_path(path, "result", ".txt")
-                out.write_text(result, encoding="utf-8")
+                safe_files.write(out, result, overwrite=False)
                 return f"{result[:300]}...\n\nFull result saved to: {out}"
             return result
         except Exception as e:
@@ -205,7 +207,7 @@ def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
 
         if action == "extract_text":
             out = _output_path(path, "text", ".txt")
-            out.write_text(text, encoding="utf-8")
+            safe_files.write(out, text, overwrite=False)
             return f"Text extracted ({len(text)} chars). Saved: {out.name}"
 
         prompt_map = {
@@ -220,7 +222,7 @@ def _process_pdf(path: Path, action: str, params: dict, speak=None) -> str:
             result   = response.text.strip()
             if len(result) > 600 and params.get("save", True):
                 out = _output_path(path, action, ".txt")
-                out.write_text(result, encoding="utf-8")
+                safe_files.write(out, result, overwrite=False)
                 return f"{result[:400]}...\n\nFull result saved: {out.name}"
             return result
         except Exception as e:
@@ -284,7 +286,7 @@ def _process_text_doc(path: Path, file_type: str, action: str,
     if action == "extract_text":
         if file_type != "txt":
             out = _output_path(path, "extracted", ".txt")
-            out.write_text(content, encoding="utf-8")
+            safe_files.write(out, content, overwrite=False)
             return f"Text extracted. Saved: {out.name}"
         return content[:2000]
 
@@ -310,7 +312,7 @@ def _process_text_doc(path: Path, file_type: str, action: str,
         result   = response.text.strip()
         if len(result) > 600 and params.get("save", True):
             out = _output_path(path, action, ".txt")
-            out.write_text(result, encoding="utf-8")
+            safe_files.write(out, result, overwrite=False)
             return f"{result[:400]}...\n\nFull result saved: {out.name}"
         return result
     except Exception as e:
@@ -428,7 +430,7 @@ def _process_json(path: Path, action: str, params: dict, speak=None) -> str:
 
     if action == "format":
         out = _output_path(path, "formatted", ".json")
-        out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        safe_files.write(out, json.dumps(data, indent=2, ensure_ascii=False), overwrite=False)
         return f"Formatted JSON saved: {out.name}"
 
     if action in ("analyze", "summarize", "extract"):
@@ -463,19 +465,8 @@ def _process_code(path: Path, action: str, params: dict, speak=None) -> str:
     ext     = path.suffix.lstrip(".")
 
     if action == "run":
-        if ext == "py":
-            try:
-                result = subprocess.run(
-                    ["python", str(path)],
-                    capture_output=True, text=True, timeout=30
-                )
-                out = result.stdout or result.stderr
-                return f"Output:\n{out[:2000]}" if out else "No output."
-            except subprocess.TimeoutExpired:
-                return "Execution timed out (30s)."
-            except Exception as e:
-                return f"Run failed: {e}"
-        return f"Direct execution not supported for .{ext} files."
+        from actions.code_helper import _run_file
+        return str(_run_file(path,[],30))
 
     if action == "info":
         lines = content.count("\n")
@@ -509,7 +500,7 @@ def _process_code(path: Path, action: str, params: dict, speak=None) -> str:
             out = _output_path(path, action)
             code_match = re.search(r"```(?:\w+)?\n(.*?)```", result, re.DOTALL)
             code_to_save = code_match.group(1) if code_match else result
-            out.write_text(code_to_save, encoding="utf-8")
+            safe_files.write(out, code_to_save, overwrite=False)
             return f"{result[:400]}...\n\nSaved: {out.name}"
         return result
     except Exception as e:
@@ -549,7 +540,7 @@ def _process_audio(path: Path, action: str, params: dict, speak=None) -> str:
             result = response.text.strip()
             if params.get("save", True):
                 out = _output_path(path, "transcript", ".txt")
-                out.write_text(result, encoding="utf-8")
+                safe_files.write(out, result, overwrite=False)
                 return f"Transcription saved: {out.name}\n\nPreview: {result[:300]}"
             return result
         except Exception as e:
@@ -738,9 +729,9 @@ def _process_archive(path: Path, action: str, params: dict, speak=None) -> str:
 
     if action == "extract":
         dest = Path(params.get("destination", str(path.parent / path.stem)))
-        dest.mkdir(parents=True, exist_ok=True)
+        # Extraction creates a new destination only after full member validation.
         try:
-            shutil.unpack_archive(path, dest)
+            extract_bounded(path, dest)
             return f"Extracted to: {dest}"
         except Exception as e:
             return f"Extract failed: {e}"
@@ -769,7 +760,7 @@ def _process_pptx(path: Path, action: str, params: dict, speak=None) -> str:
         text = _read_pptx_text()
         if action == "extract_text":
             out = _output_path(path, "text", ".txt")
-            out.write_text(text, encoding="utf-8")
+            safe_files.write(out, text, overwrite=False)
             return f"Text extracted. Saved: {out.name}"
         try:
             model    = _gemini_client()
@@ -786,7 +777,8 @@ def file_processor(parameters: dict, player=None, speak=None) -> str:
     if not file_path_str:
         return "No file path provided."
 
-    path = Path(file_path_str)
+    try: path = path_policy.validate(file_path_str)
+    except Exception as e: return f"File access denied: {e}"
     if not path.exists():
         return f"File not found: {file_path_str}"
     if not path.is_file():
