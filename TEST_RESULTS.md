@@ -63,3 +63,7 @@ Hosted CI definitions were added for Windows/Linux Python 3.12, but hosted jobs 
 5. Browser profiles/sign-in/locks and meaningful page outcomes; optional PDF/Office/media adapters and ffmpeg; no assumed purchase/send result.
 6. Trusted-LAN HTTPS certificate trust, real phone revocation/expiry/WS reconnection/mic permissions; no firewall/insecure-browser-policy changes during these repair tests.
 7. Real same-minute reminder registration/notification timing across sleep/timezone changes, with explicit user intent to create jobs. Recurring/edit/cancel/missed-reminder management and verified messaging adapters need further implementation; offline conversation remains not implemented.
+
+## Source delivery verification
+
+The tracked source ZIP passed `zipfile.ZipFile.testzip()` (CRC check), includes all four requested repair/setup documents, and excludes runtime configuration, recovery data, bytecode and virtual environments. Both original tracked image/avatar assets were compared byte-for-byte against baseline commit `59f65af` and preserved. `git bundle verify /workspace/artifacts/Mark-LV-repairs.bundle` passed; the bundle contains the local repair branch and complete history. These are packaging checks, not additional regression tests. The bundle history includes disposable test snapshots from an earlier repair commit; the final source ZIP excludes those snapshots. No push or publication was performed.
