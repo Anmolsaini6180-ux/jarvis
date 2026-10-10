@@ -22,14 +22,16 @@ _BLOCKED = {
 }
 
 def _is_blocked(topic: str) -> bool:
-    t = topic.lower()
-    return any(word in t for word in _BLOCKED)
+    tokens=set(re.findall(r'\w+',topic.casefold()))
+    return bool(tokens & _BLOCKED)
 
 
 # ── Slug / hash helpers ────────────────────────────────────────────────────────
 
 def _slug(topic: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", topic.lower().strip())[:40].strip("_")
+    import unicodedata
+    normalized=unicodedata.normalize('NFKC',topic).casefold().strip()
+    return 'topic_'+hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:24]
 
 def _title_hash(title: str) -> str:
     return hashlib.md5(title.encode("utf-8", errors="ignore")).hexdigest()[:12]
@@ -43,15 +45,9 @@ def _load() -> dict:
     return data if isinstance(data, dict) else {}
 
 def _save(monitors: dict) -> None:
-    from memory.memory_manager import load_memory, MEMORY_PATH, _lock
-    memory = load_memory()
-    memory["monitors"] = monitors
-    with _lock:
-        MEMORY_PATH.parent.mkdir(parents=True, exist_ok=True)
-        MEMORY_PATH.write_text(
-            json.dumps(memory, indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+    from memory.memory_manager import MEMORY_PATH
+    from core.storage import update
+    update(MEMORY_PATH,lambda data:data.__setitem__('monitors',monitors))
 
 
 # ── Public API ─────────────────────────────────────────────────────────────────
@@ -64,8 +60,8 @@ def add_monitor(topic: str) -> str:
         return "I don't monitor crypto or financial topics."
     monitors = _load()
     slug = _slug(topic)
-    if slug in monitors:
-        return f"Already monitoring: {monitors[slug]['topic']}"
+    for record in monitors.values():
+        if _slug(record.get('topic',''))==slug:return f"Already monitoring: {record['topic']}"
     monitors[slug] = {
         "topic":      topic,
         "added":      datetime.now().strftime("%Y-%m-%d"),
@@ -73,7 +69,7 @@ def add_monitor(topic: str) -> str:
         "last_hash":  "",
     }
     _save(monitors)
-    print(f"[Monitor] ➕ Added: {topic}")
+    print("[Monitor] Monitor added; topic redacted")
     return f"Now monitoring: {topic}"
 
 
@@ -148,12 +144,25 @@ def check_all() -> list[str]:
             if source:
                 parts.append(f"Source: {source}")
             alerts.append("\n".join(parts))
-            print(f"[Monitor] 🔔 New headline for '{topic}': {title[:60]}")
+            print("[Monitor] New headline found; private topic redacted")
 
         except Exception as e:
-            print(f"[Monitor] ⚠️ Check failed for '{topic}': {e}")
+            print(f"[Monitor] Check failed: {type(e).__name__}; topic redacted")
 
     if changed:
         _save(monitors)
 
     return alerts
+
+
+def _monitor_transaction(fn):
+    from functools import wraps
+    @wraps(fn)
+    def run(*args,**kwargs):
+        from memory.memory_manager import MEMORY_PATH
+        from core.storage import transaction
+        with transaction(MEMORY_PATH):return fn(*args,**kwargs)
+    return run
+add_monitor=_monitor_transaction(add_monitor)
+remove_monitor=_monitor_transaction(remove_monitor)
+check_all=_monitor_transaction(check_all)

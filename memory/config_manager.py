@@ -1,3 +1,5 @@
+from core import storage, credentials
+import warnings
 import json
 import sys
 from pathlib import Path
@@ -18,30 +20,73 @@ def config_exists() -> bool:
     return CONFIG_FILE.exists()
 
 def save_api_keys(gemini_api_key: str) -> None:
-    ensure_config_dir()
-
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-
-    data["gemini_api_key"] = gemini_api_key.strip()
-
-    CONFIG_FILE.write_text(
-        json.dumps(data, indent=2),
-        encoding="utf-8"
-    )
+    save_config({'gemini_api_key':gemini_api_key.strip()})
 
 def load_api_keys() -> dict:
-    if not CONFIG_FILE.exists():
-        return {}
-    try:
-        return json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-    except Exception as e:
-        print(f"❌ Failed to load api_keys.json: {e}")
-        return {}
+    with storage.transaction(CONFIG_FILE):
+        data=storage.read(CONFIG_FILE,{})
+        if not data: return data
+        try: vault=credentials.backend(CONFIG_DIR/'credentials')
+        except credentials.CredentialUnavailable:
+            if credentials.has_plaintext(data):
+                warnings.warn('Legacy plaintext credentials remain. Native secure backend unavailable; configure it before migration. Existing file preserved.',RuntimeWarning)
+                return data
+            if _has_refs(data):raise
+            return data
+        if credentials.has_plaintext(data):
+            data=_migrate_credentials(data,vault)
+        return credentials.resolve(data,vault)
+
+def _has_refs(data):
+    if isinstance(data,dict): return '$credential' in data or any(_has_refs(v) for v in data.values())
+    if isinstance(data,list): return any(_has_refs(v) for v in data)
+    return False
+
+def _migrate_credentials(data,vault):
+    # Names are unique across installations and repeated migrations; native
+    # keyrings share a service namespace, so a fixed backup name loses history.
+    import hashlib, uuid
+    identifier=uuid.uuid4().hex
+    prefix='config/'+hashlib.sha256(str(CONFIG_FILE.resolve()).encode()).hexdigest()[:16]
+    name=prefix+'/migration-backup/'+identifier
+    raw=json.dumps(data,ensure_ascii=False)
+    vault.set(name,raw)
+    if vault.get(name)!=raw:
+        raise credentials.CredentialUnavailable('Encrypted migration backup verification failed')
+    protected=credentials.protect(data,vault,prefix=prefix)
+    credentials.resolve(protected,vault)
+    backup=CONFIG_FILE.with_name(CONFIG_FILE.name+'.bak')
+    previous=''
+    if backup.exists():
+        previous=prefix+'/migration-backup-previous/'+identifier
+        prior=backup.read_text(encoding='utf-8');vault.set(previous,prior)
+        if vault.get(previous)!=prior:
+            raise credentials.CredentialUnavailable('Previous backup protection failed')
+    journal=CONFIG_DIR/'credential_migrations.json'
+    storage.update(journal,lambda records:records.__setitem__(identifier,
+        {'backup':name,'previous_backup':previous,'status':'prepared'}))
+    storage.write(CONFIG_FILE,protected,backup=False)
+    storage.write(backup,protected,backup=False)
+    storage.update(journal,lambda records:records[identifier].update(status='migrated'))
+    return protected
+
+def _secure_update(mutate):
+    with storage.transaction(CONFIG_FILE):
+        data=load_api_keys()
+        mutate(data)
+        if credentials.has_plaintext(data):
+            vault=credentials.backend(CONFIG_DIR/'credentials')
+            protected=credentials.protect(data,vault,prefix='config/'+__import__('hashlib').sha256(str(CONFIG_FILE.resolve()).encode()).hexdigest()[:16])
+            credentials.resolve(protected,vault)
+        else: protected=data
+        old=storage.read(CONFIG_FILE,{})
+        if credentials.has_plaintext(old):
+            _migrate_credentials(old,vault)
+        return storage.write(CONFIG_FILE,protected)
+
+def save_config(fields):
+    """Merge explicit settings; never reset unrelated user configuration."""
+    return _secure_update(lambda data:data.update(fields))
 
 def get_gemini_key() -> str | None:
     return load_api_keys().get("gemini_api_key")
@@ -61,18 +106,8 @@ def get_user_name() -> str:
     return load_api_keys().get("user_name", "")
 
 
-def save_assistant_config(assistant_name: str, user_name: str) -> None:
-    """Persist assistant name and user name to config."""
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["assistant_name"] = assistant_name.strip() or "JARVIS"
-    data["user_name"] = user_name.strip()
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+def save_assistant_config(assistant_name: str,user_name: str) -> None:
+    save_config({'assistant_name':assistant_name.strip() or 'JARVIS','user_name':user_name.strip()})
 
 
 # ── Assistant voice ──────────────────────────────────────────────────────────
@@ -90,18 +125,7 @@ def get_voice() -> str:
 
 
 def save_voice(voice_name: str) -> None:
-    """Persist the chosen Live voice. Unknown names collapse to the default so a
-    bad value can never reach the API and break the session."""
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    v = (voice_name or "").strip()
-    data["voice_name"] = v if v in AVAILABLE_VOICES else DEFAULT_VOICE
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    save_config({'voice_name':voice_name if voice_name in AVAILABLE_VOICES else DEFAULT_VOICE})
 
 
 def get_wake_word_enabled() -> bool:
@@ -110,15 +134,7 @@ def get_wake_word_enabled() -> bool:
 
 
 def save_wake_word_enabled(enabled: bool) -> None:
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["wake_word_enabled"] = bool(enabled)
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    save_config({'wake_word_enabled':bool(enabled)})
 
 
 def get_push_to_talk_enabled() -> bool:
@@ -204,18 +220,10 @@ def get_turn_tuning() -> dict:
 
 
 def save_turn_tuning(values: dict) -> None:
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    cur = data.get("turn_tuning")
-    cur = dict(cur) if isinstance(cur, dict) else {}
-    cur.update(values or {})
-    data["turn_tuning"] = cur
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    def mutate(data):
+        cur=data.get('turn_tuning',{});cur=dict(cur) if isinstance(cur,dict) else {}
+        cur.update(values or {});data['turn_tuning']=cur
+    _secure_update(mutate)
 
 
 def get_proactive_audio_enabled() -> bool:
@@ -252,17 +260,8 @@ def save_media_resolution(value: str) -> None:
     _save_flag("media_resolution", v if v in MEDIA_RESOLUTIONS else "medium")
 
 
-def _save_flag(key: str, value) -> None:
-    """Read-modify-write one key without disturbing the rest of the config."""
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data[key] = bool(value) if isinstance(value, bool) else value
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+def _save_flag(key: str,value) -> None:
+    save_config({key:value})
 
 
 def get_brief_enabled() -> bool:
@@ -270,15 +269,7 @@ def get_brief_enabled() -> bool:
 
 
 def save_brief_enabled(enabled: bool) -> None:
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data["morning_brief_enabled"] = enabled
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    save_config({'morning_brief_enabled':bool(enabled)})
 
 
 # ── Audio devices ────────────────────────────────────────────────────────────
@@ -289,20 +280,7 @@ def save_brief_enabled(enabled: bool) -> None:
 # so unplugging a headset degrades to the built-in speakers instead of crashing.
 
 def _patch_config(**fields) -> None:
-    """Read-modify-write one or more keys in api_keys.json.
-
-    Every setter in this file open-coded this. Collapsing it here means a new
-    setting is one line, and there is one place where a corrupt config file is
-    handled instead of nine."""
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    data.update(fields)
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+    save_config(fields)
 
 
 def get_input_device() -> str:
@@ -346,39 +324,23 @@ def get_plugin_setting(namespace: str, key: str, default=None):
     return get_plugin_config(namespace).get(key, default)
 
 
-def save_plugin_config(namespace: str, values: dict) -> None:
-    """Merge `values` into a namespace's stored config (read-modify-write, like
-    every other helper here). Only the provided keys are touched."""
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    pc = data.get("plugin_config")
-    if not isinstance(pc, dict):
-        pc = {}
-    cur = pc.get(namespace)
-    if not isinstance(cur, dict):
-        cur = {}
-    cur.update(values)
-    pc[namespace] = cur
-    data["plugin_config"] = pc
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+def save_plugin_config(namespace: str,values: dict) -> None:
+    def mutate(data):
+        pc=data.setdefault('plugin_config',{});cur=pc.setdefault(namespace,{})
+        cur.update(values)
+    _secure_update(mutate)
 
 
-def save_plugin_enabled(plugin_name: str, enabled: bool) -> None:
-    ensure_config_dir()
-    data: dict = {}
-    if CONFIG_FILE.exists():
-        try:
-            data = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        except Exception:
-            data = {}
-    plugins_cfg = data.get("plugins_enabled")
-    if not isinstance(plugins_cfg, dict):
-        plugins_cfg = {}
-    plugins_cfg[plugin_name] = enabled
-    data["plugins_enabled"] = plugins_cfg
-    CONFIG_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+def save_plugin_enabled(plugin_name: str,enabled: bool) -> None:
+    def mutate(data):data.setdefault('plugins_enabled',{})[plugin_name]=bool(enabled)
+    _secure_update(mutate)
+
+
+def get_response_language():
+    value=load_api_keys().get('response_language','auto')
+    return value if value in {'auto','english','hinglish'} else 'auto'
+def save_response_language(value):
+    if value not in {'auto','english','hinglish'}:raise ValueError('Unsupported response preference')
+    save_config({'response_language':value})
+def get_lightweight_mode():return bool(load_api_keys().get('lightweight_mode',False))
+def save_lightweight_mode(enabled):save_config({'lightweight_mode':bool(enabled)})

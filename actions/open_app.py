@@ -1,3 +1,5 @@
+import os
+from pathlib import Path
 import time
 import subprocess
 import platform
@@ -75,45 +77,46 @@ def _normalize(raw: str) -> str:
         if alias_key in key or key in alias_key:
             return os_map.get(_SYSTEM, raw)
 
-    return raw  
+    return raw
+
+def _check_installed_binary(binary):
+    from core import path_policy
+    p=Path(binary).resolve()
+    with path_policy._lock:scopes=list(path_policy._scopes)
+    if p.is_relative_to(path_policy.BASE) or any(p==root or (directory and p.is_relative_to(root)) for root,directory in scopes):
+        raise ValueError('Workspace/project executables cannot launch on the host; use the isolated generated-code runner')
+    if p.suffix.lower() in {'.py','.pyw','.ps1','.vbs','.wsf','.hta','.sh'}:
+        raise ValueError('Host script launch refused; generate/edit or use the isolated runner')
 
 def _launch_windows(app_name: str) -> bool:
-
-    if shutil.which(app_name) or shutil.which(app_name.split(".")[0]):
-        try:
-            subprocess.Popen(
-                app_name,
-                shell=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            time.sleep(1.5)
-            return True
-        except Exception as e:
-            print(f"[open_app] subprocess failed: {e}")
-
-    if ":" in app_name:
-        try:
-            subprocess.Popen(f"start {app_name}", shell=True)
-            time.sleep(1.0)
-            return True
-        except Exception:
-            pass
-
+    # Launch only an executable resolved by PATH, never interpolate a shell command.
+    if any(c in app_name for c in "\n\r;&|<>`$"):
+        raise ValueError("Application name contains command syntax")
+    exe = shutil.which(app_name)
+    if exe:_check_installed_binary(exe)
+    if exe and Path(exe).suffix.lower() not in {'.bat', '.cmd', '.ps1'}:
+        subprocess.Popen([exe], shell=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return True
+    if ':' in app_name:
+        # Reviewed built-in Windows application activation protocols only.
+        if app_name.lower() not in {'ms-settings:', 'calculator:', 'ms-windows-store:', 'spotify:', 'whatsapp:'}:
+            raise ValueError('Unreviewed activation protocol refused')
+        os.startfile(app_name)
+        return True
+    if len(app_name) > 120 or any(c in app_name for c in '\\/:'):
+        raise ValueError('Use an installed application name without a path or arguments')
     try:
-        import pyautogui
-        pyautogui.PAUSE = 0.1
-        pyautogui.press("win")
+        from core.native import desktop_input
+        pyautogui = desktop_input()
+        pyautogui.press('win')
         time.sleep(0.7)
         pyautogui.write(app_name, interval=0.05)
         time.sleep(0.9)
-        pyautogui.press("enter")
-        time.sleep(2.5)
+        pyautogui.press('enter')
         return True
     except Exception as e:
-        print(f"[open_app] Start Menu search failed: {e}")
-
-    return False
+        print(f'[open_app] Start Menu unavailable: {type(e).__name__}')
+        return False
 
 
 def _launch_macos(app_name: str) -> bool:
@@ -142,6 +145,7 @@ def _launch_macos(app_name: str) -> bool:
 
     binary = shutil.which(app_name) or shutil.which(app_name.lower())
     if binary:
+        _check_installed_binary(binary)
         try:
             subprocess.Popen(
                 [binary],
@@ -154,7 +158,8 @@ def _launch_macos(app_name: str) -> bool:
             pass
 
     try:
-        import pyautogui
+        from core.native import desktop_input
+        pyautogui = desktop_input()
         pyautogui.hotkey("command", "space")
         time.sleep(0.6)
         pyautogui.write(app_name, interval=0.05)
@@ -193,6 +198,7 @@ def _launch_linux(app_name: str) -> bool:
         shutil.which(app_name.lower().replace(" ", "_"))
     )
     if binary:
+        _check_installed_binary(binary)
         try:
             subprocess.Popen(
                 [binary],
@@ -252,6 +258,8 @@ def open_app(
     if launcher is None:
         return f"Unsupported operating system: {_SYSTEM}"
 
+    if '/' in app_name or '\\' in app_name:
+        return 'Use an installed application name; host project/script paths must use the isolated runner.'
     normalized = _normalize(app_name)
     print(f"[open_app] Launching: '{app_name}' → '{normalized}' ({_SYSTEM})")
 
@@ -260,10 +268,10 @@ def open_app(
 
     try:
         if launcher(normalized):
-            return f"Opened {app_name}."
+            return f"Launch requested for {app_name}; application window/function unverified."
         if normalized.lower() != app_name.lower():
             if launcher(app_name):
-                return f"Opened {app_name}."
+                return f"Launch requested for {app_name}; application window/function unverified."
         return (
             f"Could not confirm that {app_name} launched. "
             f"It may still be loading, or it might not be installed."
@@ -276,7 +284,7 @@ def open_app(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "open_app",
-    "description": "Opens any application on the computer. Use this whenever the user asks to open, launch, or start any app, website, or program. Always call this tool — never just say you opened it.",
+    "description": "Requests launch of installed applications by name; target window/function remains unverified. Host script/project executables are refused. Use browser_control for websites.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

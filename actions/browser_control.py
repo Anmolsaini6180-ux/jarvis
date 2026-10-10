@@ -22,20 +22,16 @@ from playwright.async_api import (
 _OS = platform.system()   # "Windows" | "Darwin" | "Linux"
 
 def _normalize_url(url: str) -> str:
-    """
-    Bare words like "instagram" → "https://instagram.com"
-    Domains like "instagram.com" → "https://instagram.com"
-    Full URLs pass through unchanged.
-    """
-    url = url.strip()
-    if not url:
-        return "about:blank"
-    if "://" in url:
-        return url
-    # No dot at all → assume .com  (e.g. "instagram" → "instagram.com")
-    if "." not in url:
-        url = url + ".com"
-    return "https://" + url
+    from urllib.parse import urlsplit
+    url=url.strip()
+    if not url or url=='about:blank':return 'about:blank'
+    if ':' in url and '://' not in url:
+        raise ValueError('URLs with an ambiguous scheme are refused; specify https://host:port explicitly')
+    if '://' not in url:url='https://'+(url if '.' in url else url+'.com')
+    parsed=urlsplit(url)
+    if parsed.scheme not in {'http','https'} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError('Browser URLs must be HTTP(S), without embedded credentials; local/device/javascript URLs refused')
+    return url
 
 
 def _user_agent() -> str:
@@ -395,7 +391,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 cmd = ["open", "-a", app] + ([url] if url else [])
                 try:
                     subprocess.run(cmd, check=True, timeout=10)
-                    return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                    return f"Launch requested in {name}: {url}; page loading unverified." if url else f"Launch requested: {name}; window unverified."
                 except Exception as e:
                     print(f"[Browser] 'open -a {app}' failed ({e}), trying binary…")
 
@@ -412,7 +408,7 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                     [exe, url] if url else [exe],
                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 )
-                return f"Opened in {name}: {url}" if url else f"Opened {name}."
+                return f"Launch requested in {name}: {url}; page loading unverified." if url else f"Launch requested: {name}; window unverified."
             except Exception as e:
                 print(f"[Browser] Native launch failed for {name}: {e}")
         print(f"[Browser] '{name}' not found — falling back to default browser.")
@@ -431,11 +427,11 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
                 ["xdg-open", url],
                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
-        return f"Opened in your default browser: {url}"
+        return f"Launch requested in default browser: {url}; controlled profile/tab unavailable; page loading unverified."
     except Exception:
         try:
             if webbrowser.open(url):
-                return f"Opened in your default browser: {url}"
+                return f"Launch requested in default browser: {url}; controlled profile/tab unavailable; page loading unverified."
         except Exception:
             pass
         return f"Could not open a browser for: {url}"
@@ -444,12 +440,15 @@ def _open_native(url: str, browser_name: Optional[str]) -> str:
 class _BrowserSession:
     """
     A full session for one browser instance.
-    All browsers open on the real profile via launch_persistent_context.
+    Chromium automation uses a disclosed dedicated profile; native launches are unverified.
     """
 
     def __init__(self, browser_name: str):
         self.browser_name = browser_name
         self._spec        = _resolve_browser(browser_name)
+        self._profile_path = 'not launched'
+        self._profile_fallback = False
+        self._init_error = None
 
         self._loop:    asyncio.AbstractEventLoop | None = None
         self._thread:  threading.Thread | None          = None
@@ -468,14 +467,16 @@ class _BrowserSession:
             name=f"BrowserThread-{self.browser_name}",
         )
         self._thread.start()
-        self._ready.wait(timeout=20)
+        if not self._ready.wait(timeout=20):raise RuntimeError('Browser initialization timed out')
+        if self._init_error:raise RuntimeError('Browser dependency initialization failed: '+str(self._init_error))
 
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()
         asyncio.set_event_loop(self._loop)
-        self._loop.run_until_complete(self._async_init())
-        self._ready.set()
-        self._loop.run_forever()
+        try:self._loop.run_until_complete(self._async_init())
+        except Exception as e:self._init_error=type(e).__name__
+        finally:self._ready.set()
+        if not self._init_error:self._loop.run_forever()
 
     async def _async_init(self):
         self._pw = await async_playwright().start()
@@ -484,7 +485,15 @@ class _BrowserSession:
         if not self._loop:
             raise RuntimeError(f"Session for '{self.browser_name}' not started.")
         future = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return future.result(timeout=timeout)
+        from core.execution import current_cancel
+        import time
+        event=current_cancel();started=time.monotonic()
+        while True:
+            if event and event.is_set():future.cancel();raise RuntimeError('Browser operation cancelled; dispatched effects may remain')
+            try:return future.result(timeout=.1)
+            except concurrent.futures.TimeoutError:
+                if time.monotonic()-started>=timeout:
+                    future.cancel();raise
 
     def close(self):
         if self._loop:
@@ -546,11 +555,13 @@ class _BrowserSession:
                 kwargs["executable_path"] = exe
             try:
                 self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
+                self._profile_path = profile
             except Exception as e:
                 print(f"[Browser] Firefox real profile failed ({e}), using JARVIS profile")
                 jarvis = str(Path.home() / ".jarvis_profiles" / "firefox_jarvis")
                 Path(jarvis).mkdir(parents=True, exist_ok=True)
                 self._context = await engine_obj.launch_persistent_context(jarvis, **kwargs)
+                self._profile_path = jarvis;self._profile_fallback = True
 
             self._page = await self._adopt_page()
             print(f"[Browser] ✅ Firefox launched")
@@ -567,11 +578,14 @@ class _BrowserSession:
                 "timeout":     25_000,
             }
             self._context = await engine_obj.launch_persistent_context(safari_profile, **kwargs)
+            self._profile_path = safari_profile;self._profile_fallback = True
             self._page = await self._adopt_page()
             print(f"[Browser] ✅ Safari launched")
             return
 
-        profile = _real_profile_dir(self.browser_name)
+        profile = str(Path.home() / '.jarvis_profiles' / self.browser_name)
+        Path(profile).mkdir(parents=True,exist_ok=True)
+        self._profile_fallback = True
 
         kwargs = {
             "headless":    False,
@@ -601,28 +615,12 @@ class _BrowserSession:
 
         try:
             self._context = await engine_obj.launch_persistent_context(profile, **kwargs)
+            self._profile_path = profile
             self._page = await self._adopt_page()
             print(f"[Browser] ✅ Launched [{label}] profile={profile}")
             return
         except Exception as e:
-            print(f"[Browser] ⚠️  Real profile failed for {label}: {e}")
-
-        # The real profile could not be opened (browser already open / locked
-        # profile / newer Chrome versions block the real profile under
-        # automation). Fall back to a persistent JARVIS automation profile —
-        # accounts logged in here once stay logged in on later sessions too.
-        jarvis_profile = str(Path.home() / ".jarvis_profiles" / self.browser_name)
-        Path(jarvis_profile).mkdir(parents=True, exist_ok=True)
-        print(f"[Browser] Retrying with JARVIS profile: {jarvis_profile}")
-
-        try:
-            self._context = await engine_obj.launch_persistent_context(jarvis_profile, **kwargs)
-            self._page = await self._adopt_page()
-            print(f"[Browser] ✅ Launched [{label}] with JARVIS profile "
-                  f"(sign-ins persist across sessions)")
-        except Exception as e2:
-            raise RuntimeError(f"Could not launch {self.browser_name}: {e2}") from e2
-
+            raise RuntimeError('Automation profile could not start; close its existing instance or check browser installation. Existing default profile was not modified.') from e
 
     async def _get_page(self) -> Page:
         await self._launch()
@@ -668,6 +666,19 @@ class _BrowserSession:
         base = _SEARCH_ENGINES.get(engine.lower(), _SEARCH_ENGINES["google"])
         return await self.go_to(base + query.replace(" ", "+"))
 
+    def describe_context(self):
+        tab=self._page.url if self._page else 'no active tab'
+        note='SEPARATE AUTOMATION PROFILE: sign-in may be needed; not your already-open tab.' if self._profile_fallback else 'Profile opened by this automation instance; not attached to an already-open tab.'
+        return f'Controlled browser: {self.browser_name}; profile: {self._profile_path}; tab: {tab}. {note}'
+
+    async def verify_expected(self,url=None,text=None):
+        page=await self._get_page()
+        try:
+            if url:await page.wait_for_url(url,timeout=8000)
+            if text:await page.get_by_text(text,exact=False).first.wait_for(state='visible',timeout=8000)
+            return 'Specified page postcondition verified (not proof of a purchase/send/delivery).'
+        except Exception:return 'Specified page postcondition NOT verified.'
+
     async def click(self, selector: str = None, text: str = None) -> str:
         page = await self._get_page()
         try:
@@ -691,7 +702,10 @@ class _BrowserSession:
             if clear_first:
                 await el.clear()
             await el.type(text, delay=50)
-            return "Text typed."
+            expected=text if clear_first else None
+            actual=await el.input_value()
+            if expected is None:return 'Input dispatched; appended contents not fully verified.'
+            return 'Input value verified.' if actual==expected else 'Input mismatch; typing outcome not verified.'
         except Exception as e:
             return f"Type error: {e}"
 
@@ -732,10 +746,10 @@ class _BrowserSession:
                 el = page.locator(selector).first
                 await el.clear()
                 await el.type(str(value), delay=40)
-                results.append(f"✓ {selector}")
+                results.append(f"{'verified' if await el.input_value()==str(value) else 'MISMATCH'}: {selector}")
             except Exception as e:
                 results.append(f"✗ {selector}: {e}")
-        return "Form filled: " + ", ".join(results)
+        return "Form input checks (not submission): " + ", ".join(results)
 
     async def smart_click(self, description: str) -> str:
         page = await self._get_page()
@@ -802,14 +816,14 @@ class _BrowserSession:
             return "Tab closed."
         return "No active tab to close."
 
-    async def screenshot(self, path: str = None) -> str:
-        page = await self._get_page()
-        try:
-            save_path = path or str(Path.home() / "Desktop" / "jarvis_screenshot.png")
-            await page.screenshot(path=save_path, full_page=False)
-            return f"Screenshot saved: {save_path}"
-        except Exception as e:
-            return f"Screenshot error: {e}"
+    async def screenshot(self,path=None):
+        from core import path_policy,safe_files
+        import uuid
+        page=await self._get_page()
+        target=path_policy.validate(path or (path_policy.DEFAULT_WORKSPACE/'Screenshots'/('browser-'+uuid.uuid4().hex+'.png')))
+        data=await page.screenshot(full_page=True)
+        safe_files.write(target,data,overwrite=False)
+        return f'Screenshot saved: {target}'
 
     async def back(self) -> str:
         page = await self._get_page()
@@ -1049,6 +1063,11 @@ def browser_control(
     except Exception as e:
         result = f"Browser error ({action}): {e}"
 
+    if action in {'click','smart_click','press'}:
+        if params.get('expected_url') or params.get('expected_text'):
+            result += '\n'+sess.run(sess.verify_expected(params.get('expected_url'),params.get('expected_text')))
+        else:result += '\nAction dispatch only; business outcome unverified. Supply an expected URL/text for a postcondition check.'
+    result += '\n'+sess.describe_context()
     _log(player, result)
     return result
 
@@ -1063,7 +1082,7 @@ def _log(player, text: str):
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "browser_control",
-    "description": "Controls any web browser. Use for: opening websites, searching the web, clicking elements, filling forms, scrolling, screenshots, navigation, any web-based task. Simple open/search requests launch the user's own browser normally (their real profile and logged-in accounts); interactive actions (click, type, fill_form...) attach an automation browser. Always pass the 'browser' parameter when the user specifies a browser (e.g. 'open in Edge', 'use Firefox', 'open Chrome'). Multiple browsers can run simultaneously.",
+    "description": "Controls any web browser. Use for: opening websites, searching the web, clicking elements, filling forms, scrolling, screenshots, navigation, any web-based task. Simple open/search requests launch the user's own browser normally (their real profile and logged-in accounts); interactive actions launch a separate automation instance, may fall back to a separate profile, and report its identity. No existing-tab attachment is guaranteed. Always pass the 'browser' parameter when the user specifies a browser (e.g. 'open in Edge', 'use Firefox', 'open Chrome'). Multiple browsers can run simultaneously.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
@@ -1119,6 +1138,9 @@ TOOL = {
                 "type": "BOOLEAN",
                 "description": "Open in private/incognito mode"
             },
+            "expected_url": {"type":"STRING"},
+            "expected_text": {"type":"STRING"},
+            "fields": {"type":"OBJECT", "additionalProperties":{"type":"STRING"}},
             "clear_first": {
                 "type": "BOOLEAN",
                 "description": "Clear field before typing (default: true)"

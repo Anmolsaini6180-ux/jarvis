@@ -9,7 +9,7 @@ import os, re, threading
 BASE = Path(__file__).resolve().parent.parent
 DEFAULT_WORKSPACE = Path.home() / 'Documents' / 'JarvisWorkspace'
 _PROTECTED_NAMES = {'.git', '.ssh', '.aws', '.azure', '.gnupg', '.env',
-                    'api_keys.json', 'settings.json', 'credentials', '.jarvis-deps'}
+                    'api_keys.json', 'settings.json', 'credentials', '.jarvis-deps', '.venv', 'secrets.json'}
 _RESERVED = re.compile(r'^(CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(?:\..*)?$', re.I)
 _lock = threading.RLock()
 _scopes = [(DEFAULT_WORKSPACE, True)]
@@ -45,21 +45,23 @@ def _no_links(p):
             raise PermissionError('Reparse points are not permitted')
 
 def _protected(p):
-    if p == BASE or any(p.is_relative_to(BASE / n) for n in
+    if p == BASE or p in {BASE/'main.py',BASE/'ui.py',BASE/'setup.py'} or any(p.is_relative_to(BASE / n) for n in
         ('config','memory','plugins','core','actions','dashboard')):
         return True
-    return any(part.lower() in _PROTECTED_NAMES for part in p.parts)
+    return any(part.lower() in _PROTECTED_NAMES or part.lower().startswith(('.env.', 'credentials.','client_secret')) for part in p.parts)
 
 def grant(path, directory=False):
     """Trusted UI callback only. Never expose as a model parameter handler."""
     p=Path(validate_spelling(path)).expanduser().absolute(); _no_links(p); p=p.resolve()
-    if _protected(p) or (directory and p in {Path(p.anchor),Path.home().resolve()}):
+    if _protected(p) or (directory and (p==Path(p.anchor) or Path.home().resolve().is_relative_to(p))):
         raise PermissionError('Cannot grant a machine/home/assistant sensitive scope')
     with _lock:
         if (p,directory) not in _scopes: _scopes.append((p,directory))
     return p
 
 def validate(path, roots=None):
+    from core.tasks import checkpoint
+    checkpoint()
     p=Path(validate_spelling(path)).expanduser().absolute();_no_links(p);p=p.resolve()
     if _protected(p): raise PermissionError('Protected assistant/credential metadata')
     with _lock: scopes=list(_scopes) if roots is None else [(Path(r).resolve(),True) for r in roots]
@@ -68,7 +70,9 @@ def validate(path, roots=None):
     return p
 
 def project_path(root, relative):
-    root=Path(root).resolve(); s=validate_spelling(relative,relative=True)
+    from core.tasks import checkpoint
+    checkpoint()
+    root=Path(root).expanduser().absolute();_no_links(root);root=root.resolve();s=validate_spelling(relative,relative=True)
     p=root/s;_no_links(p);p=p.resolve()
     if p == root or not p.is_relative_to(root) or _protected(p):
         raise PermissionError('Invalid/protected project destination')
@@ -80,3 +84,10 @@ def validate_tree(path):
         for name in dirs+files:
             p=Path(base)/name;_no_links(p)
             if _protected(p): raise PermissionError('Tree contains protected metadata')
+
+
+def default_workspace():
+    """Return/create the currently approved default workspace, never a broad fallback."""
+    root=validate(DEFAULT_WORKSPACE)
+    root.mkdir(parents=True,exist_ok=True)
+    return root

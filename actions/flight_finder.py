@@ -19,8 +19,10 @@ API_CONFIG_PATH = BASE_DIR / "config" / "api_keys.json"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
 _MONTH_MAP: dict[str, int] = {
 
@@ -112,7 +114,7 @@ def _build_google_flights_url(
     return (
         f"{base}"
         f"?q={trip}"
-        f"&tfs=CBwQAhoeEgoyMDI1LTAzLTE1agcIARIDSVNUcgcIARIDTEhS"   
+        f"&tfs=CBwQAhoeEgoyMDI1LTAzLTE1agcIARIDSVNUcgcIARIDTEhS"
         f"&curr=USD"
         f"&cabin={cabin_code}"
         f"&adults={passengers}"
@@ -272,12 +274,14 @@ def _format_text_report(
 
 def _save_to_desktop(content: str, origin: str, destination: str) -> str:
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"flights_{origin}_{destination}_{ts}.txt".replace(" ", "_")
-    desktop  = Path.home() / "Desktop"
+    filename = f"flights_{ts}.txt"
+    from core import path_policy, safe_files
+    import uuid
+    desktop = path_policy.default_workspace() / 'Reports' / uuid.uuid4().hex
     desktop.mkdir(parents=True, exist_ok=True)
     filepath = desktop / filename
 
-    filepath.write_text(content, encoding="utf-8")
+    safe_files.write(filepath, content, overwrite=False)
     print(f"[FlightFinder] 💾 Saved: {filepath}")
 
     try:
@@ -350,7 +354,7 @@ def flight_finder(parameters: dict, player=None, speak=None) -> str:
         if save and flights:
             report     = _format_text_report(flights, origin, destination, date, return_date, page_url)
             saved_path = _save_to_desktop(report, origin, destination)
-            result    += f" Results saved to Desktop: {saved_path}"
+            result    += f" Results saved to workspace: {saved_path}"
 
         return result
 

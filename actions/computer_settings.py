@@ -1,3 +1,5 @@
+from core.tasks import checkpoint, cancellable_sleep
+from core.native import cancellable_type
 #computer_settings.py
 import json
 import re
@@ -8,11 +10,12 @@ import platform
 from pathlib import Path
 
 try:
-    import pyautogui
+    from core.native import desktop_input
+    pyautogui = desktop_input()
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.05
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 try:
@@ -38,9 +41,10 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 def _get_api_key() -> str:
-    path = _get_base_dir() / "config" / "api_keys.json"
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
 def _get_macos_wifi_interface() -> str:
     try:
@@ -56,7 +60,7 @@ def _get_macos_wifi_interface() -> str:
                         return lines[j].split(":", 1)[1].strip()
     except Exception:
         pass
-    return "en0" 
+    return "en0"
 
 def volume_up():
     if _OS == "Windows":
@@ -90,6 +94,24 @@ def volume_mute():
         subprocess.run(["pactl", "set-sink-mute", "@DEFAULT_SINK@", "toggle"],
             capture_output=True)
 
+from contextlib import contextmanager
+
+@contextmanager
+def _windows_volume_endpoint():
+    import comtypes
+    from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
+    comtypes.CoInitialize()
+    try:
+        device=AudioUtilities.GetSpeakers()
+        if hasattr(device,'EndpointVolume'):
+            endpoint=device.EndpointVolume
+        else:
+            from ctypes import cast, POINTER
+            endpoint=cast(device.Activate(IAudioEndpointVolume._iid_,comtypes.CLSCTX_ALL,None),POINTER(IAudioEndpointVolume))
+        yield endpoint
+    finally:
+        comtypes.CoUninitialize()
+
 def volume_get() -> int | None:
     """Current master volume 0-100, or None if this platform will not say.
 
@@ -98,17 +120,8 @@ def volume_get() -> int | None:
     undoable — a wrong undo is worse than no undo."""
     try:
         if _OS == "Windows":
-            import math
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            db        = vol.GetMasterVolumeLevel()
-            if db <= -65.0:
-                return 0
-            return max(0, min(100, round(10 ** (db / 20) * 100)))
+            with _windows_volume_endpoint() as vol:
+                return max(0,min(100,round(vol.GetMasterVolumeLevelScalar()*100)))
         if _OS == "Darwin":
             r = subprocess.run(["osascript", "-e", "output volume of (get volume settings)"],
                                capture_output=True, text=True, timeout=5)
@@ -163,20 +176,17 @@ def volume_set(value: int):
     value = max(0, min(100, int(value)))
     if _OS == "Windows":
         try:
-            import math
-            from ctypes import cast, POINTER
-            from comtypes import CLSCTX_ALL
-            from pycaw.pycaw import AudioUtilities, IAudioEndpointVolume
-            devices   = AudioUtilities.GetSpeakers()
-            interface = devices.Activate(IAudioEndpointVolume._iid_, CLSCTX_ALL, None)
-            vol       = cast(interface, POINTER(IAudioEndpointVolume))
-            vol_db    = -65.25 if value == 0 else max(-65.25, 20 * math.log10(value / 100))
-            vol.SetMasterVolumeLevel(vol_db, None)
+            with _windows_volume_endpoint() as vol:
+                vol.SetMasterVolumeLevelScalar(value/100,None)
             return
         except Exception as e:
             print(f"[Settings] pycaw failed, using keypress fallback: {e}")
-            pyautogui.press("volumemute")
-            pyautogui.press("volumemute")
+            if not _PYAUTOGUI:raise RuntimeError('Windows volume endpoint and keyboard input unavailable') from e
+            from core.tasks import checkpoint
+            for _ in range(50):
+                checkpoint();pyautogui.press('volumedown')
+            for _ in range(round(value/2)):
+                checkpoint();pyautogui.press('volumeup')
     elif _OS == "Darwin":
         subprocess.run(["osascript", "-e", f"set volume output volume {value}"],
             capture_output=True)
@@ -381,8 +391,9 @@ def find_on_page():
 
 def reload_page_n(n: int):
     for _ in range(max(1, n)):
+        checkpoint()
         refresh_page()
-        time.sleep(0.8)
+        cancellable_sleep(0.8)
 
 
 def scroll_up(amount: int = 500):    pyautogui.scroll(amount)
@@ -437,12 +448,12 @@ def type_text(text: str, press_enter_after: bool = False):
         return
     if _PYPERCLIP:
         pyperclip.copy(str(text))
-        time.sleep(0.15)
+        cancellable_sleep(0.15)
         paste()
     else:
-        pyautogui.write(str(text), interval=0.03)
+        cancellable_type(str(text), interval=0.03, keyboard=pyautogui)
     if press_enter_after:
-        time.sleep(0.1)
+        cancellable_sleep(0.1)
         pyautogui.press("enter")
 
 def take_screenshot():
@@ -781,6 +792,15 @@ def _suggest(description: str) -> str:
     return (f"I could not match '{description}' to a computer action. "
             f"Call computer_settings again with an exact `action` from: {hint}.")
 
+def _guarded_setting_undo(getter, setter, before, after):
+    def restore():
+        current = getter()
+        if after is None or current is None or current != after:
+            raise RuntimeError('Undo conflict: setting changed or cannot be verified; current value preserved')
+        setter(before)
+        return f'Setting restored to {before}.'
+    return restore
+
 def computer_settings(
     parameters: dict = None,
     response=None,
@@ -806,7 +826,7 @@ def computer_settings(
     if not action:
         return _suggest(description or raw_action)
 
-    print(f"[Settings] Action: {action}  Value: {value}  OS: {_OS}")
+    print(f"[Settings] Action: {action}; parameters redacted; OS: {_OS}")
     if player:
         player.write_log(f"[Settings] {action}")
 
@@ -825,18 +845,21 @@ def computer_settings(
                     "Ask the user to answer that one first.")
         return confirm.request(
             key=action, title=title, detail=detail,
-            run=lambda f=func, a=action: (f(), f"{a} done.")[1],
+            run=lambda f=func, a=action: (f(), f"{a} requested; OS outcome unverified.")[1],
         )
 
     if action == "volume_set":
         try:
-            target = int(value if value is not None else 50)
+            target = max(0,min(100,int(value if value is not None else 50)))
             before = volume_get()
             volume_set(target)
             if before is not None:
                 push_undo(f"volume {before}% → {target}%",
-                          lambda b=before: (volume_set(b), f"Back to {b}%.")[1])
-            return f"Volume set to {target}%."
+                          _guarded_setting_undo(volume_get, volume_set, before, volume_get()))
+            after=volume_get()
+            if after is None:return f'Volume change requested toward {target}%; actual value unverified.'
+            if abs(after-target)>1:return f'Volume mismatch: requested {target}%, observed {after}%. Outcome not verified.'
+            return f'Volume verified at {after}%.'
         except Exception as e:
             return f"Could not set volume: {e}"
 
@@ -846,7 +869,7 @@ def computer_settings(
             return "No text provided to type."
         enter_after = str(params.get("press_enter", "false")).lower() in ("true", "1", "yes")
         type_text(text, press_enter_after=enter_after)
-        return f"Typed: {text[:80]}"
+        return "Text input dispatched; active target/content not independently verified."
 
     if action == "press_key":
         key = str(value or params.get("key", "")).strip()
@@ -880,7 +903,7 @@ def computer_settings(
     # tell us the current value, nothing is registered — an undo that restores
     # a guess is worse than no undo at all.
     _before = None
-    if action in ("volume_up", "volume_down", "mute", "unmute", "toggle_mute"):
+    if action in ("volume_up", "volume_down"):
         _before = ("volume", volume_get())
     elif action in ("brightness_up", "brightness_down"):
         _before = ("brightness", brightness_get())
@@ -896,22 +919,17 @@ def computer_settings(
         if old is not None:
             if kind == "volume":
                 push_undo(f"volume ({action})",
-                          lambda b=old: (volume_set(b), f"Volume back to {b}%.")[1])
+                          _guarded_setting_undo(volume_get, volume_set, old, volume_get()))
             elif kind == "brightness":
                 push_undo(f"brightness ({action})",
-                          lambda b=old: (brightness_set(b), f"Brightness back to {b}%.")[1])
-    elif action == "dark_mode":
-        # A pure toggle: calling it again is the undo.
-        push_undo("dark mode toggled",
-                  lambda: (dark_mode(), "Theme switched back.")[1])
-
-    return f"Done: {action}."
+                          _guarded_setting_undo(brightness_get, brightness_set, old, brightness_get()))
+    return f"Action handler returned: {action}; target state not independently verified."
 
 
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "computer_settings",
-    "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume, brightness and dark mode can be reversed with the `undo` tool.",
+    "description": "Controls the computer: volume, brightness, window management, keyboard shortcuts, typing text on screen, closing apps, fullscreen, dark mode, WiFi, restart, shutdown, scrolling, tab management, zoom, screenshots, lock screen, refresh/reload page. Use for ANY single computer control command. restart, shutdown and toggle_wifi put a confirmation on the user's screen and do NOT happen until they press it — never claim they are done. Volume/brightness undo checks for newer changes. Dark mode has no verified undo.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

@@ -10,9 +10,10 @@ from datetime import datetime
 from urllib.parse import quote_plus
 
 try:
-    import pyautogui
+    from core.native import desktop_input
+    pyautogui = desktop_input()
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 try:
@@ -58,8 +59,10 @@ _YT_VIDEO_FILTER = "EgIQAQ%3D%3D"
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
 
 def _open_url(url: str) -> None:
@@ -196,7 +199,9 @@ def _summarize_with_gemini(transcript: str, video_url: str) -> str:
 def _save_summary(content: str, video_url: str) -> str:
     ts       = datetime.now().strftime("%Y%m%d_%H%M%S")
     filename = f"youtube_summary_{ts}.txt"
-    desktop  = Path.home() / "Desktop"
+    from core import path_policy, safe_files
+    import uuid
+    desktop = path_policy.default_workspace() / 'Reports' / uuid.uuid4().hex
     desktop.mkdir(parents=True, exist_ok=True)
     filepath = desktop / filename
 
@@ -207,7 +212,7 @@ def _save_summary(content: str, video_url: str) -> str:
         f"Date   : {datetime.now().strftime('%Y-%m-%d %H:%M')}\n"
         f"{'─' * 50}\n\n"
     )
-    filepath.write_text(header + content, encoding="utf-8")
+    safe_files.write(filepath, header + content, overwrite=False)
 
     try:
         if is_windows():
@@ -344,7 +349,7 @@ def _handle_summarize(parameters: dict, player, speak) -> str:
 
     if parameters.get("save", False):
         saved_path = _save_summary(summary, url)
-        return f"Summary complete and saved to Desktop: {saved_path}"
+        return f"Summary complete and saved to workspace: {saved_path}"
 
     return summary
 

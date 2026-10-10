@@ -196,7 +196,8 @@ def _get_steam_window_rect() -> tuple[int, int, int, int] | None:
 def _click_first_profile_by_screenshot() -> bool:
 
     try:
-        import pyautogui
+        from core.native import desktop_input
+        pyautogui = desktop_input()
         import numpy as np
 
         time.sleep(1.5)
@@ -344,7 +345,8 @@ def _click_button(window, keywords: list[str]) -> bool:
 
 def _handle_install_dialog_pyautogui(game_name: str, best_drive: dict) -> str:
     try:
-        import pyautogui
+        from core.native import desktop_input
+        pyautogui = desktop_input()
         import pygetwindow as gw
     except ImportError:
         return (f"Install dialog opened for '{game_name}'. "
@@ -653,7 +655,7 @@ def _watch_and_shutdown(steam_path: Path, speak=None,
                 speak(f"Download started for {names}. I'll shut down when done.")
             break
     else:
-        return  
+        return
 
     while time.time() < deadline:
         time.sleep(check_interval)
@@ -724,7 +726,7 @@ def _epic_manifests_path() -> Path | None:
         p = Path.home() / "Library" / "Application Support" \
             / "Epic" / "EpicGamesLauncher" / "Data" / "Manifests"
         return p if p.exists() else None
-    return None  
+    return None
 
 
 def _get_epic_games() -> list[dict]:

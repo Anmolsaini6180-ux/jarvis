@@ -52,11 +52,13 @@ class _Pending:
     title:   str
     detail:  str
     run:     Callable[[], str]
+    cancel:  object
     at:      float
 
 
 _pending: Optional[_Pending] = None
 _lock = threading.Lock()
+_active_cancels = set()
 
 # Set once at startup by main.py. Signature: (title, detail) -> None for show,
 # and () -> None for hide. Both are marshalled onto the Qt thread by the UI.
@@ -87,6 +89,8 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
     rather than reading an English string verbatim."""
     global _pending
 
+    if not isinstance(detail,str) or len(detail)>12000 or len(title)>120:
+        return 'Confirmation preview is invalid/too long; no action queued. Shorten or split the operation.'
     if _show_cb is None:
         # No interface bound (headless, or a very early call). Refuse rather
         # than silently performing something irreversible.
@@ -97,7 +101,7 @@ def request(key: str, title: str, detail: str, run: Callable[[], str]) -> str:
         if _pending and time.monotonic() - _pending.at <= TIMEOUT_SECONDS:
             return f"[CONFIRMATION_BUSY] Resolve the pending '{_pending.title}' first. Nothing new was queued."
         _pending = _Pending(key=key, title=title, detail=detail,
-                            run=run, at=time.monotonic())
+                            run=run, cancel=_cancel_event() or threading.Event(), at=time.monotonic())
 
     try:
         _show_cb(title, detail)
@@ -142,12 +146,25 @@ def resolve(accepted: bool) -> None:
         _log(f"SYS: Cancelled — {p.title}")
         return
 
+    with _lock:_active_cancels.add(p.cancel)
     def _worker():
+        if p.cancel and p.cancel.is_set():
+            with _lock:_active_cancels.discard(p.cancel)
+            _log('SYS: Confirmation action was cancelled.');return
+        from core.tasks import _CANCEL
+        token=_CANCEL.set(p.cancel)
         try:
-            result = p.run() or "Done."
+            from core.safe_files import LOCK
+            from core.tasks import checkpoint
+            with LOCK:
+                checkpoint()
+                result = p.run() or 'No result returned; outcome unverified.'
             _log(f"SYS: Confirmed — {p.title}. {result}")
         except Exception as e:
-            _log(f"ERR: {p.title} failed — {e}")
+            _log(f"ERR: Confirmed action failed — {type(e).__name__}")
+        finally:
+            _CANCEL.reset(token)
+            with _lock:_active_cancels.discard(p.cancel)
 
     threading.Thread(target=_worker, daemon=True,
                      name=f"confirm-{p.key}").start()
@@ -161,3 +178,16 @@ def pending_title() -> str:
         if time.monotonic() - _pending.at > TIMEOUT_SECONDS:
             return ""
         return _pending.title
+
+
+def _cancel_event():
+    from core.tasks import cancellation_event
+    return cancellation_event()
+
+def cancel_pending():
+    global _pending
+    with _lock:
+        if _pending and _pending.cancel:_pending.cancel.set()
+        _pending=None
+        for cancel in _active_cancels:cancel.set()
+    if _hide_cb:_hide_cb()

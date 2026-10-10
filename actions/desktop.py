@@ -11,9 +11,10 @@ from pathlib import Path
 from datetime import datetime
 
 try:
-    import pyautogui
+    from core.native import desktop_input
+    pyautogui = desktop_input()
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 _OS = platform.system()  # "Windows" | "Darwin" | "Linux"
@@ -25,10 +26,11 @@ def _get_base_dir() -> Path:
     return Path(__file__).resolve().parent.parent
 
 def _get_api_key() -> str:
-    path = _get_base_dir() / "config" / "api_keys.json"
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
-    
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
+
 def _get_desktop() -> Path:
     if _OS == "Linux":
         xdg = os.environ.get("XDG_DESKTOP_DIR", "")
@@ -61,7 +63,8 @@ def _ask_gemini_for_desktop_action(task: str) -> str:
     return (response.text or '').strip() if response else '{}'
 
 def set_wallpaper(image_path: str) -> str:
-    path = Path(image_path).expanduser().resolve()
+    try: path = path_policy.validate(image_path)
+    except (ValueError,PermissionError) as e:return f'Wallpaper access denied: {e}'
     if not path.exists():
         return f"Image not found: {image_path}"
     if path.suffix.lower() not in {".jpg", ".jpeg", ".png", ".bmp", ".webp"}:
@@ -73,32 +76,35 @@ def set_wallpaper(image_path: str) -> str:
             if path.suffix.lower() in {".webp", ".png"}:
                 try:
                     from PIL import Image
-                    bmp_path = Path(tempfile.mktemp(suffix=".bmp"))
+                    import uuid
+                    bmp_path = path_policy.default_workspace() / 'Wallpapers' / (uuid.uuid4().hex+'.bmp')
+                    bmp_path.parent.mkdir(parents=True,exist_ok=True)
                     Image.open(path).convert("RGB").save(bmp_path, "BMP")
                     path = bmp_path
                 except ImportError:
-                    pass 
-            ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3)
-            return f"Wallpaper set: {path.name}"
+                    pass
+            if not ctypes.windll.user32.SystemParametersInfoW(20, 0, str(path), 3):
+                raise OSError('Windows rejected the wallpaper request')
+            return f"Wallpaper request accepted for {path.name}; visual result unverified."
 
         elif _OS == "Darwin":
             script = (
                 f'tell application "System Events" to tell every desktop to '
                 f'set picture to POSIX file "{path}"'
             )
-            subprocess.run(["osascript", "-e", script], capture_output=True)
-            return f"Wallpaper set: {path.name}"
+            _checked_process(["osascript", "-e", script], capture_output=True)
+            return f"Wallpaper request accepted for {path.name}; visual result unverified."
 
         else:
             desktop_env = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
             uri = f"file://{path}"
 
             if "gnome" in desktop_env or "unity" in desktop_env:
-                subprocess.run([
+                _checked_process([
                     "gsettings", "set", "org.gnome.desktop.background",
                     "picture-uri", uri
                 ], capture_output=True)
-                subprocess.run([
+                _checked_process([
                     "gsettings", "set", "org.gnome.desktop.background",
                     "picture-uri-dark", uri
                 ], capture_output=True)
@@ -114,21 +120,21 @@ for (var i = 0; i < allDesktops.length; i++) {{
     d.writeConfig("Image", "file://{path}");
 }}
 """
-                subprocess.run(
+                _checked_process(
                     ["qdbus", "org.kde.plasmashell", "/PlasmaShell",
                      "org.kde.PlasmaShell.evaluateScript", script],
                     capture_output=True
                 )
 
             elif "xfce" in desktop_env:
-                subprocess.run([
+                _checked_process([
                     "xfconf-query", "-c", "xfce4-desktop",
                     "-p", "/backdrop/screen0/monitor0/workspace0/last-image",
                     "-s", str(path)
                 ], capture_output=True)
 
             else:
-                result = subprocess.run(
+                result = _checked_process(
                     ["feh", "--bg-scale", str(path)],
                     capture_output=True
                 )
@@ -138,7 +144,7 @@ for (var i = 0; i < allDesktops.length; i++) {{
                         f"Try manually or install 'feh'."
                     )
 
-            return f"Wallpaper set: {path.name}"
+            return f"Wallpaper request accepted for {path.name}; visual result unverified."
 
     except Exception as e:
         return f"Could not set wallpaper: {e}"
@@ -146,18 +152,20 @@ for (var i = 0; i < allDesktops.length; i++) {{
 
 def set_wallpaper_from_url(url: str) -> str:
     try:
-        import urllib.request
-        suffix = Path(url.split("?")[0]).suffix or ".jpg"
-        tmp    = Path(tempfile.mktemp(suffix=suffix))
-        urllib.request.urlretrieve(url, str(tmp))
-        result = set_wallpaper(str(tmp))
-        try:
-            tmp.unlink()
-        except Exception:
-            pass
-        return result
+        from urllib.parse import urlsplit
+        import urllib.request, uuid
+        parsed = urlsplit(url)
+        if parsed.scheme not in {'http', 'https'} or not parsed.hostname or parsed.username:
+            return 'Wallpaper download requires an HTTP(S) URL without credentials.'
+        tmp = path_policy.default_workspace() / 'Wallpapers' / (uuid.uuid4().hex + '.jpg')
+        tmp.parent.mkdir(parents=True, exist_ok=True)
+        with urllib.request.urlopen(url, timeout=15) as response:
+            content = response.read(20*1024*1024+1)
+        if len(content)>20*1024*1024:return 'Wallpaper exceeds 20 MB download limit.'
+        safe_files.write(tmp,content,overwrite=False)
+        return set_wallpaper(str(tmp))
     except Exception as e:
-        return f"Could not download wallpaper: {e}"
+        return f'Could not download wallpaper: {type(e).__name__}: {e}'
 
 
 def get_current_wallpaper() -> str:
@@ -175,7 +183,7 @@ def get_current_wallpaper() -> str:
             script = (
                 'tell application "System Events" to get picture of desktop 1'
             )
-            result = subprocess.run(
+            result = _checked_process(
                 ["osascript", "-e", script],
                 capture_output=True, text=True
             )
@@ -184,7 +192,7 @@ def get_current_wallpaper() -> str:
         else:
             desktop_env = os.environ.get("XDG_CURRENT_DESKTOP", "").lower()
             if "gnome" in desktop_env or "unity" in desktop_env:
-                result = subprocess.run(
+                result = _checked_process(
                     ["gsettings", "get", "org.gnome.desktop.background", "picture-uri"],
                     capture_output=True, text=True
                 )
@@ -423,3 +431,11 @@ TOOL = {
     },
     "handler": desktop_control,
 }
+
+
+def _checked_process(argv, **kwargs):
+    from core.execution import run_trusted
+    result=run_trusted(argv,timeout=kwargs.get('timeout',15))
+    if not result.succeeded:
+        raise RuntimeError(f'Desktop command {result.status}; exit={result.exit_code}: {result.stderr[:200]}')
+    return subprocess.CompletedProcess(argv,result.exit_code,result.stdout,result.stderr)

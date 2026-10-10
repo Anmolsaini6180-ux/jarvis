@@ -1,0 +1,12 @@
+# External API verification
+
+Checked during this repair (2026-10-10):
+
+- Official `googleapis/python-genai` README: https://github.com/googleapis/python-genai/blob/main/README.md. Its text-generation example uses `gemini-flash-latest`; the default REST text helper now uses this documented alias instead of an unverified multi-model ladder. `JARVIS_TEXT_MODEL` permits a locally configured account-supported model. Text/code output is never automatically routed through voice transcription.
+- Official Gemini Live cookbook: https://github.com/google-gemini/cookbook/blob/main/quickstarts/Get_started_LiveAPI.ipynb. The original active `gemini-3.1-flash-live-preview` model is listed; retained by default. `JARVIS_LIVE_MODEL` supports a locally chosen account-supported model. Names being documented does not prove account access, availability, pricing or every optional configuration field.
+- Installed `google-genai==2.29.0` exposes `AsyncSession.send_client_content`, `send_realtime_input`, `send_tool_response(function_responses=...)`, tool IDs and object additional-properties schemas. Tests instantiate actual SDK declarations; conversation tests use a fake transport. No account/API request was made.
+- Installed Playwright `BrowserType.launch_persistent_context` documentation warns against automating the regular/default Chrome user-data directory and recommends a dedicated profile. Chromium automation follows this design and discloses the profile. Browser tests use fake pages; actual browsers/profiles were not tested.
+
+- Official Pycaw README and endpoint-volume interface source: https://github.com/AndreMiras/pycaw/blob/master/README.md and https://github.com/AndreMiras/pycaw/blob/master/pycaw/api/endpointvolume/__init__.py. Verified `AudioUtilities.GetSpeakers().EndpointVolume` and scalar volume methods. The helper supports the older activation path and initializes COM per worker context; actual Windows endpoint/keyboard behavior remains untested.
+
+Provider documentation hosts for Gemini, Docker, Microsoft and Playwright were denied by this cloud network proxy. The official GitHub SDK/cookbook sources and installed SDK/docstrings were accessible. This limitation is not treated as live API or Docker validation. Container policy and Windows DPAPI code require their platform smoke checks; see setup/threat-model documentation. Provider quotas/prices/features can change and were not inferred.

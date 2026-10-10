@@ -1,10 +1,10 @@
 from core.dashboard_security import RateLimit, RequestLimits
 """
-dashboard/server.py — JARVIS Local HTTP Dashboard
+dashboard/server.py — JARVIS opt-in local HTTPS dashboard
 
 TLS-only remote dashboard on port 8000, inactive until local UI activation.
 Security at the application layer: AES-256-CBC with session-key-derived key.
-CryptoJS is auto-downloaded once and served locally — no CDN needed after that.
+CryptoJS is served from a bundled/cache copy, or explicitly redirected to the CDN; no automatic server download.
 
 Install deps:  pip install fastapi "uvicorn[standard]" cryptography
 """
@@ -49,13 +49,9 @@ def _make_uploads_dir() -> Path:
 
 UPLOADS_DIR = _make_uploads_dir()
 
-def _get_gemini_key() -> str | None:
-    try:
-        import json as _json
-        with open(BASE_DIR / "config" / "api_keys.json", "r", encoding="utf-8") as f:
-            return _json.load(f).get("gemini_api_key")
-    except Exception:
-        return None
+def _get_gemini_key():
+    from memory.config_manager import get_gemini_key
+    return get_gemini_key()
 
 _KEY_CHARS = [c for c in (string.ascii_uppercase + string.digits)
               if c not in ('O', 'I', 'L', '0', '1')]
@@ -238,6 +234,7 @@ class DashboardServer:
         self._aes_cache:  dict[str, bytes]= {}   # session_key → AES bytes
         self._clients: set[WebSocket]     = set()
         self._history: list[dict]         = []
+        self._broadcast_inflight = 0
         self._active = False
         self._token_expiry = {}
         self._ws_tokens = {}
@@ -275,13 +272,12 @@ class DashboardServer:
         return f"{proto}://{self._ip}:{PORT}"
 
     def get_manual_url(self) -> str:
-        """URL for manual browser entry. When HTTPS active, points to alias port (also HTTPS)."""
-        if self._ssl_enabled():
-            return f"{self._ip}:{PORT + 1}"
-        return f"{self._ip}:{PORT}"
+        """Explicit HTTPS endpoint; no plaintext/alias listener."""
+        return self.get_url()
 
     def _aes_key(self, session_key: str) -> bytes:
         if session_key not in self._aes_cache:
+            if len(self._aes_cache)>=128:self._aes_cache.pop(next(iter(self._aes_cache)))
             self._aes_cache[session_key] = _derive_key(session_key)
         return self._aes_cache[session_key]
 
@@ -305,18 +301,27 @@ class DashboardServer:
     # ── broadcast ────────────────────────────────────────────────────────
 
     async def broadcast(self, msg: dict) -> None:
-        self._history.append(msg)
-        if len(self._history) > 300:
-            self._history = self._history[-300:]
-        dead: set[WebSocket] = set()
-        for ws in list(self._clients):
-            if not self._authorized(self._ws_tokens.get(ws,'')):
-                await self.invalidate(self._ws_tokens.get(ws,''));continue
-            try:
-                await ws.send_json(msg)
-            except Exception:
-                dead.add(ws)
-        self._clients -= dead
+        # No private conversation history is collected before local activation.
+        # Avoid unbounded waiting send tasks if a phone stops reading.
+        if not self._active or self._broadcast_inflight>=16:return
+        import json
+        msg=dict(msg)
+        if isinstance(msg.get('text'),str) and len(msg['text'])>4096:
+            msg['text']=msg['text'][:4096]+' [partial]'
+        if len(json.dumps(msg,ensure_ascii=False).encode())>16384:return
+        self._broadcast_inflight+=1
+        try:
+            self._history.append(msg)
+            if len(self._history)>300:self._history=self._history[-300:]
+            for ws in list(self._clients):
+                if not self._authorized(self._ws_tokens.get(ws,'')):
+                    await self.invalidate(self._ws_tokens.get(ws,''));continue
+                try:await asyncio.wait_for(ws.send_json(msg),timeout=2)
+                except Exception:
+                    self._clients.discard(ws);self._ws_tokens.pop(ws,None)
+                    try:await asyncio.wait_for(ws.close(code=1013),timeout=1)
+                    except Exception:pass
+        finally:self._broadcast_inflight-=1
 
     # ── FastAPI app ───────────────────────────────────────────────────────
 
@@ -325,7 +330,7 @@ class DashboardServer:
         app.add_middleware(RequestLimits,max_upload=MAX_UPLOAD_MB*1024*1024)
         @app.middleware('http')
         async def security_headers(req,call_next):
-            if req.url.path in {'/login','/auto-login','/api/device-login'} and req.method != 'GET' or req.url.path=='/auto-login':
+            if (req.url.path in {'/login','/api/device-login'} and req.method != 'GET') or req.url.path=='/auto-login':
                 if not self._rate.allow(req.client.host if req.client else 'unknown'):
                     return JSONResponse({'error':'Too many pairing attempts'},status_code=429)
             try: response=await call_next(req)
@@ -372,6 +377,7 @@ class DashboardServer:
         @app.post("/login")
         async def login(req: Request):
             body    = await req.json()
+            if not isinstance(body,dict):return JSONResponse({"error":"Object required"},status_code=400)
             entered = str(body.get("pin", "")).strip().upper()
             now     = time.time()
             if self._active and entered in self._pending_keys and self._pending_keys[entered] > now:
@@ -406,12 +412,19 @@ class DashboardServer:
 <p>Press <strong style="color:#dde3ed">Remote Control</strong> in JARVIS to get a new QR code.</p>
 </div></body></html>""")
 
+            for device,record in list(self._device_sessions.items()):
+                if record['expires']<=time.time(): self._device_sessions.pop(device,None)
+            if len(self._device_sessions)>=32:
+                return JSONResponse({'error':'Device limit reached'},status_code=429)
             del self._pending_keys[key]
             tok     = secrets.token_urlsafe(32)
             dev_tok = secrets.token_urlsafe(32)
             self._issue(tok)
             self._token_keys[tok] = key
             self._aes_key(key)
+            for device,record in list(self._device_sessions.items()):
+                if record['expires']<=time.time():self._device_sessions.pop(device,None)
+            if len(self._device_sessions)>=32:return JSONResponse({'error':'Device limit reached'},status_code=429)
             self._device_sessions[dev_tok] = {"session_key": key, "expires": time.time()+30*86400}
 
             if self._connect_callback:
@@ -444,7 +457,10 @@ class DashboardServer:
                 body = await req.json()
             except Exception:
                 return JSONResponse({"ok": False}, status_code=400)
-            dev_tok = (body.get("device_token") or "").strip()
+            if not isinstance(body,dict) or not isinstance(body.get('device_token',''),str):
+                return JSONResponse({'ok':False,'error':'String device_token required'},status_code=400)
+            dev_tok = (body.get('device_token') or '').strip()
+            if len(dev_tok)>256:return JSONResponse({'ok':False},status_code=400)
             if not dev_tok or dev_tok not in self._device_sessions or self._device_sessions[dev_tok]["expires"]<=time.time():
                 return JSONResponse({"ok": False}, status_code=401)
             session_key = self._device_sessions[dev_tok]["session_key"]
@@ -472,14 +488,18 @@ class DashboardServer:
         async def command(req: Request):
             if not _auth(req):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
-            body  = await req.json()
+            try: body = await req.json()
+            except (ValueError,TypeError):return JSONResponse({'error':'Invalid JSON'},status_code=400)
+            if not isinstance(body,dict):return JSONResponse({"error":"Object required"},status_code=400)
             token = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
-            enc   = body.get("enc", "")
+            enc = body.get('enc','')
+            if not isinstance(enc,str):return JSONResponse({'error':'enc must be a string'},status_code=400)
             if enc:
                 text = self._decrypt(token, enc)
                 if text is None:
                     return JSONResponse({"error": "Decryption failed"}, status_code=400)
             else:
+                if not isinstance(body.get('text',''),str):return JSONResponse({'error':'Text must be a string'},status_code=400)
                 text = (body.get("text") or "").strip()
             if text:
                 if len(text)>4096:return JSONResponse({'error':'Command too long'},status_code=413)
@@ -551,8 +571,10 @@ class DashboardServer:
 
                 safe = _safe_filename(file.filename or "upload")
                 from core import path_policy
+                path_policy.validate(self._uploads_dir)
                 self._uploads_dir.mkdir(parents=True,exist_ok=True)
-                path_policy.validate_spelling(safe,relative=True)
+                try:path_policy.validate_spelling(safe,relative=True)
+                except ValueError:return JSONResponse({'error':'Invalid/reserved filename'},status_code=400)
                 dest = path_policy.validate(self._uploads_dir / safe)
                 stem, suffix = Path(safe).stem, Path(safe).suffix
                 counter = 1
@@ -655,7 +677,11 @@ class DashboardServer:
                     if len(raw)>8192:
                         await websocket.close(code=1009);break
                     import json
-                    data=json.loads(raw)
+                    try: data=json.loads(raw)
+                    except (ValueError,TypeError,RecursionError):
+                        await websocket.close(code=1003);break
+                    if not isinstance(data,dict) or not isinstance(data.get('text',''),str) or not isinstance(data.get('enc',''),str):
+                        await websocket.close(code=1003);break
                     if data.get("type") == "command":
                         enc = data.get("enc", "")
                         t   = self._decrypt(tok, enc) if enc else (data.get("text") or "").strip()
@@ -727,7 +753,7 @@ class DashboardServer:
         except Exception:
             self._active=False;print('[Dashboard] Invalid TLS key/certificate; service not started.');return
         cfg=uvicorn.Config(self.app,host='0.0.0.0',port=PORT,log_level='warning',access_log=False,
-            ssl_keyfile=str(key),ssl_certfile=str(cert),ws_max_size=32768,limit_concurrency=32)
+            ssl_keyfile=str(key),ssl_certfile=str(cert),ws_max_size=32768,limit_concurrency=8)
         self._server=uvicorn.Server(cfg)
         print('[Dashboard] Remote access ON with TLS. Firewall/network policy unchanged.')
         async def expiry():

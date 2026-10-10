@@ -46,19 +46,13 @@ _CONFIG_PATH = _BASE / "config" / "api_keys.json"
 
 
 def _load_config() -> dict:
-    try:
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    from memory.config_manager import load_api_keys
+    return load_api_keys()
 
 
-def _save_config_key(key: str, value) -> None:
-    try:
-        cfg = _load_config()
-        cfg[key] = value
-        _CONFIG_PATH.write_text(json.dumps(cfg, indent=4), encoding="utf-8")
-    except Exception as e:
-        print(f"[Vision] ⚠️  Could not save config key '{key}': {e}")
+def _save_config_key(key: str,value) -> None:
+    from memory.config_manager import save_config
+    save_config({key:value})
 
 
 def _get_os() -> str:

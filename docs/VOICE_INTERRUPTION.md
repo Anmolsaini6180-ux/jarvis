@@ -1,0 +1,9 @@
+# Interruption design and verification boundary
+
+The active local microphone callback discards input while the assistant is speaking. Existing spectral-band echo-tail handling (`core/echo.py`) and transcript echo rejection remain. These are heuristic filters, not a certified acoustic echo canceller (AEC), and they do not establish full duplex voice interruption.
+
+The HUD STOP/CANCEL button, Escape (while the app has focus) and typed `stop`, `cancel`, `ruk jao` or `bas` cancel queued tasks, signal the active worker/confirmation, clear queued playback and pending vision. Cancellation checkpoints stop subsequent scoped file operations and development steps. Trusted subprocess fixtures and optional containers terminate process trees where supported. Python threads/third-party calls cannot be forcibly killed safely: a stalled worker keeps its mutation slot until it returns. Completed effects are not automatically undone.
+
+A practical future voice design is a supported native WebRTC/Speex AEC using the actual output reference, with resampling/delay calibration and VAD on the cleaned microphone signal. Require sustained near-end speech and a confidence gate before requesting stop. Do not transmit raw output echo to the model. Start testing with a headset, then laptop speakers and changing volume, with separate quiet/noisy-room trials. Reset the AEC on device changes. Existing band-energy subtraction is insufficient evidence to remove the speaking guard.
+
+That native path is not introduced in this repair because no microphone/speaker hardware is present to validate it and it adds platform-specific binaries. Headsets and manual stop remain useful immediately. Evaluate false interruption rate, missed interruptions, stop latency, echo loops, device changes and microphone/speaker loss on a real Windows laptop before enabling barge-in. Mock tests demonstrate cancellation/reception ordering, not acoustic performance.

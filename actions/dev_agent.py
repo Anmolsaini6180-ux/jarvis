@@ -1,3 +1,4 @@
+from core.tasks import checkpoint, progress, cancellable_sleep
 from core import path_policy, safe_files
 from core.execution import ExecutionResult, run_generated, propose_dependencies
 import subprocess
@@ -25,8 +26,10 @@ MODEL_PLANNER    = gemini.SMART
 MODEL_WRITER     = gemini.SMART
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
 
 def _get_model(model_name: str = gemini.SMART):
@@ -77,7 +80,7 @@ def _classify_error(output: str) -> str:
 
     if "syntaxerror" in low or "invalid syntax" in low:
         return "syntax_error"
-    
+
     if "cannot import" in low or "importerror" in low:
         return "import_error"
 
@@ -249,7 +252,7 @@ def _open_vscode(project_dir: Path) -> bool:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-            time.sleep(1.5)
+            cancellable_sleep(1.5)
             print(f"[DevAgent] 💻 VSCode opened: {project_dir}")
             return True
         except Exception:
@@ -361,6 +364,7 @@ def _build_project(
 ) -> str:
 
     def log(msg: str):
+        progress(msg)
         print(f"[DevAgent] {msg}")
         if player:
             player.write_log(f"[DevAgent] {msg}")
@@ -418,12 +422,12 @@ def _build_project(
                     already_written=file_codes,
                 )
                 file_codes[file_path] = code
-                time.sleep(0.4)
+                cancellable_sleep(0.4)
                 break
             except RateLimitError:
                 if attempt == 0:
                     log("Rate limit — waiting 20s...")
-                    time.sleep(20)
+                    cancellable_sleep(20)
                 else:
                     log(f"Rate limit retry failed for {file_path}, skipping.")
             except Exception as e:
@@ -435,14 +439,18 @@ def _build_project(
         if speak: speak(msg)
         return msg
 
+    if len(file_codes) != len(files):
+        missing = [f['path'] for f in files if f['path'] not in file_codes]
+        return f'Project partially generated at {project_dir}: {len(file_codes)}/{len(files)} files. Missing: {missing}. Execution not attempted; functionally unverified.'
+
     if dependencies:
         install_result = _install_dependencies(dependencies, project_dir)
         log(install_result)
 
-    _open_vscode(project_dir)
+    log(f'Generated files at {project_dir}. Review them before opening the folder in your IDE; editor extensions can execute host code. No automatic editor launch.')
 
     last_output   = ""
-    auto_installs = 0  
+    auto_installs = 0
 
     for attempt in range(1, MAX_FIX_ATTEMPTS + 1):
         log(f"Running project (attempt {attempt}/{MAX_FIX_ATTEMPTS})...")
@@ -471,7 +479,7 @@ def _build_project(
             if installed:
                 auto_installs += 1
                 log("Missing dependency installed, retrying...")
-                time.sleep(1)
+                cancellable_sleep(1)
                 continue
 
         log(f"Fixing errors (type: {error_type})...")
@@ -486,7 +494,7 @@ def _build_project(
                 entry_point=entry_point,
             )
             file_codes.update(updated)
-            time.sleep(1)
+            cancellable_sleep(1)
         except RateLimitError:
             msg = "Rate limit reached during fix. Project saved, check it manually in VSCode."
             if speak: speak(msg)
@@ -531,7 +539,7 @@ def dev_agent(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "dev_agent",
-    "description": "Builds complete multi-file projects from scratch: plans, writes files, installs deps, opens VSCode, runs and fixes errors.",
+    "description": "Generates multi-file projects with scoped writes and reviewed dependency proposals. Review before opening an IDE. Runs/fixes only with an available isolated Docker runner; generated or exited does not mean functionally verified.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

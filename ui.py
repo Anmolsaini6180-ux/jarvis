@@ -73,11 +73,8 @@ API_FILE   = CONFIG_DIR / "api_keys.json"
 
 
 def _read_full_config() -> dict:
-    """Read api_keys.json config dict. Returns {} on any error."""
-    try:
-        return json.loads(API_FILE.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    from memory.config_manager import load_api_keys
+    return load_api_keys()
 
 
 # Single source of truth for the release name — the window title, the header
@@ -252,9 +249,9 @@ class _SysMetrics:
     def __init__(self):
         self.cpu  = 0.0
         self.mem  = 0.0
-        self.net  = 0.0   
-        self.gpu  = -1.0  
-        self.tmp  = -1.0  
+        self.net  = 0.0
+        self.gpu  = -1.0
+        self.tmp  = -1.0
         self._lock = threading.Lock()
         self._last_net = psutil.net_io_counters()
         self._last_net_t = time.time()
@@ -1904,7 +1901,11 @@ class PluginManagerOverlay(QWidget):
         btn.setFont(QFont("Courier New", 7, QFont.Weight.Bold))
         if not p["valid"]:
             btn.setText("BROKEN")
-            btn.setEnabled(False)
+            if str(p.get('error','')).startswith('TRUST_REQUIRED'):
+                btn.setText('REVIEW')
+                from core.plugin_trust import request_review
+                btn.clicked.connect(lambda _,file=p['file']:request_review(file))
+            else: btn.setEnabled(False)
             btn.setStyleSheet(f"""
                 QPushButton {{
                     background: transparent; color: {C.TEXT_DIM};
@@ -2002,14 +2003,18 @@ class ConfirmBanner(_HudOverlay):
         lay.addWidget(hdr)
 
         ttl = QLabel(title)
+        ttl.setTextFormat(Qt.TextFormat.PlainText)
         ttl.setWordWrap(True)
         ttl.setFont(QFont("Courier New", 10, QFont.Weight.Bold))
         ttl.setStyleSheet(f"color: {C.TEXT}; background: transparent;")
         lay.addWidget(ttl)
 
         if detail:
-            dtl = QLabel(detail)
-            dtl.setWordWrap(True)
+            from PyQt6.QtWidgets import QPlainTextEdit
+            dtl = QPlainTextEdit()
+            dtl.setPlainText(detail)
+            dtl.setReadOnly(True)
+            dtl.setFixedHeight(190)
             dtl.setFont(QFont("Courier New", 8))
             dtl.setStyleSheet(f"color: {C.TEXT_MED}; background: transparent;")
             lay.addWidget(dtl)
@@ -2943,6 +2948,7 @@ class RemoteKeyOverlay(QWidget):
 
 
 class MainWindow(QMainWindow):
+    _task_sig       = pyqtSignal(str)
     _log_sig        = pyqtSignal(str)
     _state_sig      = pyqtSignal(str)
     _content_sig    = pyqtSignal(str, str)   # (title, text) — thread-safe content display
@@ -3223,7 +3229,9 @@ class MainWindow(QMainWindow):
         # Metric update timer
         self._metric_tmr = QTimer(self)
         self._metric_tmr.timeout.connect(self._update_metrics)
-        self._metric_tmr.start(2000)
+        from memory.config_manager import get_lightweight_mode
+        self._metric_tmr.start(8000 if get_lightweight_mode() else 2000)
+        if get_lightweight_mode() and hasattr(self.hud,'_tmr'):self.hud._tmr.setInterval(100)
         self._update_metrics()
 
         self._log_sig.connect(self._log.append_log)
@@ -3311,7 +3319,7 @@ class MainWindow(QMainWindow):
             cam_idx = 0
             try:
                 import json as _j
-                cfg = _j.loads((CONFIG_DIR / "api_keys.json").read_text())
+                cfg = _read_full_config()
                 cam_idx = int(cfg.get("camera_index", 0))
             except Exception:
                 pass
@@ -4131,7 +4139,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(_sec("COMMAND INPUT"))
         lay.addLayout(self._build_input_row())
 
-        self._interrupt_btn = QPushButton("✋  INTERRUPT  [ESC]")
+        self._interrupt_btn = QPushButton("✋  STOP / CANCEL TASKS  [ESC]")
         self._interrupt_btn.setFixedHeight(34)
         self._interrupt_btn.setFont(QFont("Courier New", 8, QFont.Weight.Bold))
         self._interrupt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -4149,6 +4157,24 @@ class MainWindow(QMainWindow):
         """)
         self._interrupt_btn.clicked.connect(self._do_interrupt)
         lay.addWidget(self._interrupt_btn)
+        self._task_status = QLabel('Tasks: idle')
+        self._task_status.setWordWrap(True)
+        self._task_status.setFont(QFont('Courier New', 8))
+        self._task_sig.connect(self._task_status.setText)
+        lay.addWidget(self._task_status)
+        self._task_recent = []
+        history_btn=QPushButton('RECENT TASK STATUS')
+        history_btn.clicked.connect(lambda: self._content_sig.emit('Recent task status', '\n'.join(self._task_recent) or 'No tasks this session.'))
+        lay.addWidget(history_btn)
+        self._task_sig.connect(lambda text: self._task_recent.append(text) or (self._task_recent.pop(0) if len(self._task_recent)>100 else None))
+        from memory.config_manager import get_response_language, save_response_language, get_lightweight_mode
+        language=QComboBox();language.addItems(['auto','english','hinglish']);language.setCurrentText(get_response_language())
+        language.setToolTip('Response preference; code, proper names and numbers remain unchanged. Takes effect on reconnect.')
+        language.currentTextChanged.connect(save_response_language)
+        lay.addWidget(language)
+        self._light_btn=QPushButton('LIGHTWEIGHT MODE');self._light_btn.setCheckable(True)
+        self._light_btn.setChecked(get_lightweight_mode());self._light_btn.toggled.connect(self._set_lightweight)
+        lay.addWidget(self._light_btn)
 
         self._mute_btn = QPushButton("🎙  MICROPHONE ACTIVE")
         self._mute_btn.setFixedHeight(30)
@@ -5370,7 +5396,8 @@ class MainWindow(QMainWindow):
             data["user_name"] = user_name.strip()
             if ui_color:
                 data["ui_color"] = ui_color.strip().lower()
-            API_FILE.write_text(json.dumps(data, indent=4), encoding="utf-8")
+            from memory.config_manager import save_config
+            save_config({k:data[k] for k in ("assistant_name","user_name","voice_name","ui_color") if k in data})
             self._log.append_log(f"SYS: Identity updated — {display}")
             if color_changed:
                 self._log.append_log(f"SYS: UI colour applied — {ui_color}")
@@ -5499,6 +5526,14 @@ class MainWindow(QMainWindow):
 
     # ────────────────────────────────────────────────────────────────────────────
 
+    def _set_lightweight(self,enabled):
+        from memory.config_manager import save_lightweight_mode
+        save_lightweight_mode(enabled)
+        timer=getattr(self.hud,'_tmr',None)
+        if timer:timer.setInterval(100 if enabled else 16)
+        self._metric_tmr.setInterval(8000 if enabled else 2000)
+        self._log.append_log('SYS: Lightweight mode '+('ON (reduced animation/polling; background work paused on reconnect)' if enabled else 'OFF'))
+
     def _do_interrupt(self):
         if self.on_interrupt:
             self.on_interrupt()
@@ -5557,7 +5592,7 @@ class MainWindow(QMainWindow):
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
         try:
-            d = json.loads(API_FILE.read_text(encoding="utf-8"))
+            d = _read_full_config()
             return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
         except Exception:
             return False
@@ -5577,10 +5612,11 @@ class MainWindow(QMainWindow):
 
     def _on_setup_done(self, key: str, os_name: str):
         os.makedirs(CONFIG_DIR, exist_ok=True)
-        API_FILE.write_text(
-            json.dumps({"gemini_api_key": key, "os_system": os_name}, indent=4),
-            encoding="utf-8",
-        )
+        from memory.config_manager import save_config
+        try: save_config({'gemini_api_key':key,'os_system':os_name})
+        except Exception as e:
+            self._log.append_log('ERR: Secure configuration save failed: '+type(e).__name__)
+            return
         self._ready = True
         if self._overlay:
             self._overlay.hide()
@@ -5603,6 +5639,8 @@ class JarvisUI:
     def __init__(self, face_path: str, size=None):
         self._app = QApplication.instance() or QApplication(sys.argv)
         self._app.setStyle("Fusion")
+        self._shutdown_cb = None
+        self._app.aboutToQuit.connect(self._request_shutdown)
         self._win = MainWindow(face_path)
         self.root = _RootShim(self._app)
         self._win.show()
@@ -5663,7 +5701,7 @@ class JarvisUI:
     def show_confirm(self, title: str, detail: str) -> None:
         """Thread-safe: raise the irreversible-action gate. Called from action
         handlers running in executor threads, so it goes through a signal."""
-        self._win._confirm_sig.emit(str(title)[:120], str(detail)[:300])
+        self._win._confirm_sig.emit(str(title), str(detail))
 
     def hide_confirm(self) -> None:
         """Thread-safe: take the gate down."""
@@ -5758,11 +5796,23 @@ class JarvisUI:
         self._win._state_sig.emit(state)
 
     def write_log(self, text: str):
-        self._win._log_sig.emit(text)
+        from core.redaction import redact
+        self._win._log_sig.emit(redact(text))
 
     def wait_for_api_key(self):
         while not self._win._ready:
             time.sleep(0.1)
+
+    @property
+    def on_shutdown(self):return self._shutdown_cb
+    @on_shutdown.setter
+    def on_shutdown(self,callback):self._shutdown_cb=callback
+    def _request_shutdown(self):
+        self.stop_camera_stream();self.stop_video()
+        if self._shutdown_cb:self._shutdown_cb()
+
+    def set_task_status(self, text: str):
+        self._win._task_sig.emit(text)
 
     def show_content(self, title: str, text: str):
         """Thread-safe: display content in the panel below the HUD."""

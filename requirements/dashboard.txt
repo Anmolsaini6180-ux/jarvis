@@ -1,0 +1,5 @@
+fastapi>=0.110,<1
+uvicorn[standard]>=0.27,<1
+cryptography>=42,<50
+python-multipart>=0.0.9,<1
+qrcode[pil]>=7,<9

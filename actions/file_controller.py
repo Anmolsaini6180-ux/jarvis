@@ -42,20 +42,6 @@ def _undo_create(target: Path):
     return run
 
 
-def _undo_write(target: Path, previous: str | None):
-    """Reverse of a write: restore the old contents, or remove a file that did
-    not exist before the write created it."""
-    def _fn():
-        if previous is None:
-            if target.exists():
-                target.unlink()
-                return f"Removed '{target.name}' — it did not exist before."
-            return f"'{target.name}' is already gone."
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(previous, encoding="utf-8")
-        return f"Restored the previous contents of '{target.name}'."
-    return _fn
-
 
 def _restore_from_trash(original: Path) -> str:
     """Best-effort undelete.

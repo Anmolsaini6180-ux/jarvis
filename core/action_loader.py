@@ -103,7 +103,11 @@ class ActionRegistry:
         try:
             from core.validation import validate_arguments
             validate_arguments(parameters, rec.parameters)
-            return _call_handler(rec.handler, parameters, ctx or {}) or "No result returned; outcome unverified."
+            from core.safe_files import LOCK
+            from core.tasks import checkpoint
+            with LOCK:
+                checkpoint()
+                return _call_handler(rec.handler, parameters, ctx or {}) or "No result returned; outcome unverified."
         except Exception as e:
             self._logger(f"Action '{name}' crashed during run(): {e}")
             traceback.print_exc()

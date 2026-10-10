@@ -8,6 +8,7 @@ MAX_MEMBER=64*1024*1024
 
 def extract_bounded(source,destination):
     source=path_policy.validate(source);dest=path_policy.validate(destination)
+    if source.stat().st_size > MAX_TOTAL:raise ValueError('Archive source exceeds 256 MB input budget')
     if dest.exists():raise FileExistsError('Extraction destination exists; no files overwritten')
     dest.parent.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.jarvis-extract-',dir=dest.parent) as tmp:

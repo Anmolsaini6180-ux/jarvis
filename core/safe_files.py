@@ -23,19 +23,40 @@ def fingerprint(path):
     st=p.stat();h.update(str((st.st_mtime_ns,st.st_size)).encode())
     return h.hexdigest()
 
-def atomic_bytes(path, data, overwrite=True):
+def atomic_bytes(path, data, overwrite=True, guard=None):
     p=Path(path);p.parent.mkdir(parents=True,exist_ok=True)
     fd,tmp=tempfile.mkstemp(prefix='.jarvis-write-',dir=p.parent)
     try:
         with os.fdopen(fd,'wb') as f: f.write(data);f.flush();os.fsync(f.fileno())
+        if guard: guard()
         if overwrite: os.replace(tmp,p)
         else: os.link(tmp,p);os.unlink(tmp)
     finally:
         if os.path.exists(tmp): os.unlink(tmp)
 
+def atomic_copy_file(source,destination,overwrite=False,guard=None):
+    """Bounded-memory copy; publish only after complete I/O and conflict checks."""
+    src=Path(source);dst=Path(destination);dst.parent.mkdir(parents=True,exist_ok=True)
+    fd,tmp=tempfile.mkstemp(prefix='.jarvis-copy-',dir=dst.parent)
+    try:
+        with os.fdopen(fd,'wb') as output,src.open('rb') as original:
+            shutil.copyfileobj(original,output,length=1024*1024)
+            output.flush();os.fsync(output.fileno())
+        shutil.copystat(src,tmp)
+        if guard:guard()
+        if overwrite:os.replace(tmp,dst)
+        else:os.link(tmp,dst);os.unlink(tmp)
+    finally:
+        if os.path.exists(tmp):os.unlink(tmp)
+
+def _unchanged(path,expected,validator=path_policy.validate):
+    validator(path)
+    if fingerprint(path)!=expected:raise UndoConflict('Concurrent changes preserved; mutation not published')
+
 def snapshot(path):
-    p=Path(path); RECOVERY.mkdir(parents=True,exist_ok=True)
-    folder=RECOVERY/uuid.uuid4().hex;folder.mkdir()
+    p=Path(path); RECOVERY.mkdir(mode=0o700,parents=True,exist_ok=True)
+    if os.name!='nt':RECOVERY.chmod(0o700)
+    folder=RECOVERY/uuid.uuid4().hex;folder.mkdir(mode=0o700)
     before=fingerprint(p)
     if before is not None:
         if p.is_dir(): shutil.copytree(p,folder/'data',copy_function=shutil.copy2)
@@ -53,10 +74,12 @@ def restore(path,folder,expected,validator=path_policy.validate):
         p=validator(path)
         if fingerprint(p)!=expected: raise UndoConflict('Newer changes preserved; recovery copy remains at '+str(folder))
         data=folder/'data'
-        if p.is_dir(): shutil.rmtree(p)
-        elif p.exists(): p.unlink()
-        if data.is_dir(): shutil.copytree(data,p)
-        elif data.exists(): atomic_bytes(p,data.read_bytes(),overwrite=False);shutil.copystat(data,p)
+        if data.is_file():
+            atomic_copy_file(data,p,overwrite=True,guard=lambda:_unchanged(p,expected,validator))
+        else:
+            if p.is_dir(): shutil.rmtree(p)
+            elif p.exists(): p.unlink()
+            if data.is_dir(): shutil.copytree(data,p)
         return 'Previous state restored.'
 
 def write(path,content,overwrite=True,append=False,validator=path_policy.validate):
@@ -67,7 +90,8 @@ def write(path,content,overwrite=True,append=False,validator=path_policy.validat
         folder=snapshot(p) # failure prevents any write, including large writes
         data=content.encode('utf-8') if isinstance(content,str) else content
         if append and p.exists(): data=p.read_bytes()+data
-        validator(p);atomic_bytes(p,data,overwrite=overwrite)
+        before=json.loads((folder/'manifest.json').read_text())['before']
+        validator(p);atomic_bytes(p,data,overwrite=overwrite,guard=lambda:_unchanged(p,before,validator))
         expected=fingerprint(p);_record(folder,p,expected)
         push_undo('wrote '+p.name,lambda:restore(p,folder,expected,validator))
         return p
@@ -78,8 +102,22 @@ def copy(src,dst,validator=path_policy.validate):
         if dst.exists(): raise FileExistsError('Collision: existing destination preserved')
         path_policy.validate_tree(src)
         folder=snapshot(dst);dst.parent.mkdir(parents=True,exist_ok=True)
-        if src.is_dir(): shutil.copytree(src,dst)
-        else: atomic_bytes(dst,src.read_bytes(),overwrite=False)
+        if src.is_dir():
+            before = fingerprint(src)
+            with tempfile.TemporaryDirectory(prefix='.jarvis-copy-', dir=dst.parent) as stage_dir:
+                staged = Path(stage_dir)/'data'
+                shutil.copytree(src, staged)
+                if fingerprint(src) != before:
+                    raise UndoConflict('Source changed during copy; destination not published')
+                validator(dst)
+                if dst.exists(): raise FileExistsError('Collision: destination preserved')
+                os.rename(staged,dst)
+        else:
+            source_before=fingerprint(src)
+            def guard():
+                _unchanged(src,source_before,validator);validator(dst)
+                if dst.exists():raise FileExistsError('Collision: destination preserved')
+            atomic_copy_file(src,dst,overwrite=False,guard=guard)
         expected=fingerprint(dst);_record(folder,dst,expected)
         push_undo('copied '+src.name,lambda:restore(dst,folder,expected,validator))
         return dst

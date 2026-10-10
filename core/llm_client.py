@@ -53,10 +53,8 @@ def get_llm_provider() -> str:
 
 
 def _load_config() -> dict:
-    try:
-        return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    from memory.config_manager import load_api_keys
+    return load_api_keys()
 
 
 def ensure_ollama_running(timeout: int = 15) -> bool:
@@ -321,7 +319,7 @@ def call_llm(
     except requests.exceptions.Timeout:
         raise RuntimeError("Ollama request timed out after 120 s.")
     except requests.exceptions.HTTPError as e:
-        print(f"[LLM] HTTPError: {e.response.status_code} — {e.response.text[:200]}")
+        print(f"[LLM] HTTPError status: {e.response.status_code}; response body redacted")
         raise RuntimeError(f"Ollama HTTP error: {e.response.status_code}")
     except Exception as e:
         print(f"[LLM] Unexpected error: {type(e).__name__}: {e}")

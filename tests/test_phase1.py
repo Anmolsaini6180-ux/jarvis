@@ -14,7 +14,11 @@ class FileSafety(unittest.TestCase):
   for name in ['../escape','/tmp/escape','C:\\escape','a/../../escape','a\\..\\escape','x:stream','NUL.txt','a.']:
    with self.subTest(name=name),self.assertRaises((ValueError,PermissionError)):pp.project_path(self.root,name)
  def test_symlink(self):
-  outside=self.root.parent/'outside';(self.root/'link').symlink_to(outside)
+  outside=self.root.parent/'outside'
+  try:(self.root/'link').symlink_to(outside)
+  except OSError as e:
+   if getattr(e,'winerror',None)==1314:self.skipTest('Windows symlink creation privilege unavailable; real link check unrun')
+   raise
   with self.assertRaises(PermissionError):pp.validate(self.root/'link'/'file')
  def test_selected_file_not_parent(self):
   with patch.object(pp,'_scopes',[]):

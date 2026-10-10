@@ -14,6 +14,18 @@ class DashboardSecurity(unittest.TestCase):
  def login(self):
   key=self.server.new_key();r=self.client.post('/login',json={'pin':key});self.assertEqual(r.status_code,200)
   tok=r.json()['token'];return tok,{'Authorization':'Bearer '+tok}
+ def test_malformed_login_command_and_websocket(self):
+  for body in ([],{'device_token':2},{'device_token':'x'*257}):
+   self.assertEqual(self.client.post('/api/device-login',json=body).status_code,400)
+  tok,h=self.login()
+  self.assertEqual(self.client.post('/api/command',headers=h,content=b'{bad').status_code,400)
+  self.assertEqual(self.client.post('/api/command',headers=h,json={'enc':12}).status_code,400)
+  from starlette.websockets import WebSocketDisconnect
+  with self.client.websocket_connect('/ws?token='+tok) as ws:
+   ws.send_json([])
+   with self.assertRaises(WebSocketDisconnect):
+    for _ in range(10):ws.receive_json()
+  self.assertTrue(self.server._command_queue.empty())
  def test_unauthorized(self):self.assertEqual(self.client.post('/api/command',json={'text':'x'}).status_code,401)
  def test_revoked_http(self):
   tok,h=self.login();self.assertEqual(self.client.post('/api/revoke-devices',headers=h).status_code,200)
@@ -75,3 +87,21 @@ class MessagingSafety(unittest.TestCase):
   with patch.object(msg,'_ADAPTERS',{'fake':adapter}),patch.object(confirm,'_pending',None),patch.object(confirm,'_show_cb',lambda *a:None):
    msg.send_message({'receiver':'Fake','message_text':'test','platform':'fake'})
    self.assertIn('nothing sent',confirm._pending.run());adapter.send.assert_not_called()
+
+class BroadcastBounds(unittest.IsolatedAsyncioTestCase):
+ async def test_inactive_history_and_slow_client_bounds(self):
+  from unittest.mock import AsyncMock
+  server=DashboardServer()
+  await server.broadcast({'type':'log','text':'private inactive text'})
+  self.assertEqual(server._history,[])
+  server.new_key();server._issue('fake-token')
+  gate=asyncio.Event()
+  async def slow(message):await gate.wait()
+  ws=Mock();ws.send_json=AsyncMock(side_effect=slow);ws.close=AsyncMock()
+  server._clients.add(ws);server._ws_tokens[ws]='fake-token'
+  workers=[asyncio.create_task(server.broadcast({'type':'log','text':'x'*10000})) for _ in range(40)]
+  await asyncio.sleep(.02)
+  self.assertEqual(server._broadcast_inflight,16);self.assertEqual(len(server._history),16)
+  self.assertTrue(all(len(m['text'])<4200 for m in server._history))
+  gate.set();await asyncio.gather(*workers)
+  self.assertEqual(server._broadcast_inflight,0)

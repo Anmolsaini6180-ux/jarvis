@@ -1,3 +1,4 @@
+from core.tasks import TaskManager, in_executor, checkpoint, offer_audio
 import platform as _platform
 import subprocess as _subprocess
 
@@ -44,7 +45,11 @@ import traceback
 from datetime import datetime
 from pathlib import Path
 
-import sounddevice as sd
+try:
+    import sounddevice as sd
+except (ImportError, OSError) as audio_error:
+    sd=None
+    print('[Audio] Unavailable: '+type(audio_error).__name__+'. Run tools/diagnostics.py --audio.')
 import numpy as np
 from google import genai
 from google.genai import types
@@ -106,7 +111,7 @@ PROMPT_PATH     = BASE_DIR / "core" / "prompt.txt"
 # stepped over and the assistant keeps talking instead of failing to start.
 LIVE_MODEL          = "models/gemini-3.1-flash-live-preview"
 CHANNELS            = 1
-SEND_SAMPLE_RATE    = 16000 
+SEND_SAMPLE_RATE    = 16000
 RECEIVE_SAMPLE_RATE = 24000
 CHUNK_SIZE          = 1024
 
@@ -290,14 +295,19 @@ def _render_prompt(template: str, values: dict) -> str:
     return out
 
 
-def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+def _get_api_key():
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential is missing')
+    return key
 
 
 def _load_system_prompt() -> str:
     try:
-        return PROMPT_PATH.read_text(encoding="utf-8")
+        from memory.config_manager import get_response_language
+        preference=get_response_language()
+        directive={'auto':'Match the current user language.','english':'Reply in English.','hinglish':'Reply in simple Roman-script Hinglish.'}[preference]
+        return PROMPT_PATH.read_text(encoding="utf-8")+'\n[RESPONSE PREFERENCE] '+directive+' Preserve code, identifiers, proper names and numerical values. Offline conversation is not implemented.'
     except Exception:
         return (
             "You are JARVIS, Tony Stark's AI assistant. "
@@ -323,7 +333,7 @@ def _is_repeat_chunk(txt: str, buf: list) -> bool:
     joined = " ".join(buf)
     return txt in joined
 
-def _clean_transcript(text: str) -> str:    
+def _clean_transcript(text: str) -> str:
     text = _CTRL_RE.sub("", text)
     text = re.sub(r"[\x00-\x08\x0b-\x1f]", "", text)
     return text.strip()
@@ -540,6 +550,12 @@ class JarvisLive:
         self.ui             = ui
         self._asst_name     = "JARVI    S"   # updated each session from config
         self.session              = None
+        self._session_epoch = 0
+        self._shutdown_requested = False
+        self._delivery_tail = None
+        self._tasks = TaskManager(self._execute_tool,on_progress=self._task_progress)
+        self._deliveries = set()
+        self._delivery_lock = None
         self.audio_in_queue       = None
         self.out_queue            = None
         self._loop                     = None
@@ -579,6 +595,7 @@ class JarvisLive:
         self.ui.on_text_command   = self._on_text_command
         self.ui.on_remote_clicked = self._make_remote_key
         self.ui.on_interrupt      = self.interrupt
+        self.ui.on_shutdown = self.request_shutdown
         self.ui.on_voice_change   = self._on_voice_change     # voice picker → rebuild session
         self.ui.on_audio_device_change = self._on_audio_device_change
         self._reconnect_event: asyncio.Event | None = None
@@ -837,6 +854,8 @@ class JarvisLive:
         return url, key, f"{url}/auto-login?key={key}", manual
 
     def _on_text_command(self, text: str):
+        if text.strip().casefold() in {'stop','cancel','cancel tasks','ruk jao','bas'}:
+            self.interrupt();return
         if not self._loop or not self.session:
             return
         # Respect wake-word sleep: a typed command must not be answered while
@@ -919,8 +938,24 @@ class JarvisLive:
         except Exception:
             pass
 
+    def request_shutdown(self):
+        self._shutdown_requested=True
+        if self._loop and self._loop.is_running():
+            def stop():
+                self._tasks.cancel_all();confirm_gate.cancel_pending()
+                if self._reconnect_event:self._reconnect_event.set()
+            self._loop.call_soon_threadsafe(stop)
+
     def interrupt(self) -> None:
         """Stop JARVIS mid-speech: drain queued audio and open mic immediately."""
+        if self._loop and self._loop.is_running():
+            try: on_loop = asyncio.get_running_loop() is self._loop
+            except RuntimeError: on_loop = False
+            if not on_loop:
+                self._loop.call_soon_threadsafe(self.interrupt);return
+        self._tasks.cancel_all()
+        confirm_gate.cancel_pending()
+        self._pending_vision = None
         self._interrupted = True
         q = self.audio_in_queue
         if q:
@@ -939,7 +974,7 @@ class JarvisLive:
         self._play_cursor = 0.0     # next batch starts a fresh timeline
         if self._turn_done_event:
             self._turn_done_event.clear()
-        self.ui.write_log("SYS: Interrupted — listening...")
+        self.ui.write_log("SYS: Stop requested — speech stopped, queued calls cancelled, running work stopping cooperatively.")
 
     def speak(self, text: str):
         if not self._loop or not self.session:
@@ -962,7 +997,8 @@ class JarvisLive:
 
         # Load customization from config
         try:
-            _cfg = json.loads(open(API_CONFIG_PATH, encoding="utf-8").read())
+            from memory.config_manager import load_api_keys
+            _cfg = load_api_keys()
             self._asst_name = (_cfg.get("assistant_name") or "JARVIS").strip()
             _user_name = (_cfg.get("user_name") or "").strip()
         except Exception:
@@ -1127,7 +1163,11 @@ class JarvisLive:
         name = fc.name
         args = dict(fc.args or {})
 
-        print(f"[JARVIS] 🔧 {name}  {args}")
+        checkpoint()
+        from core.validation import validate_arguments
+        declaration=next((t for t in TOOL_DECLARATIONS if t['name']==name),None)
+        if declaration: validate_arguments(args,declaration['parameters'])
+        print(f"[JARVIS] Tool started: {name}; arguments redacted")
         self.ui.set_state("THINKING")
 
 
@@ -1137,7 +1177,7 @@ class JarvisLive:
             value    = args.get("value", "")
             if key and value:
                 update_memory({category: {key: {"value": value}}})
-                print(f"[Memory] 💾 save_memory: {category}/{key} = {value}")
+                print("[Memory] Entry saved; private values redacted")
             if not self.ui.muted:
                 self.ui.set_state("LISTENING")
             return types.FunctionResponse(
@@ -1163,7 +1203,7 @@ class JarvisLive:
                               + "\n".join(f"{i+1}. {t}" for i, t in enumerate(items))
                               ) if items else "I have not changed anything I can undo yet."
                 else:
-                    result = await loop.run_in_executor(None, undo_stack.undo_last)
+                    result = await in_executor(loop,None, undo_stack.undo_last)
 
             elif name == "screen_process":
                 import time as _t_mod
@@ -1179,13 +1219,13 @@ class JarvisLive:
                     angle     = args.get("angle", "screen").lower()
                     user_text = args.get("text", "What do you see?")
                     if angle == "camera":
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_camera)
+                        img_b, mime_t = await in_executor(loop,None, _capture_camera)
                         self.ui.start_camera_stream()
                         self._vision_cam_active = True
                         print(f"[Vision] 📷 Camera: {len(img_b):,} bytes")
                         _stall = "camera"
                     else:
-                        img_b, mime_t = await loop.run_in_executor(None, _capture_screen)
+                        img_b, mime_t = await in_executor(loop,None, _capture_screen)
                         print(f"[Vision] 🖥️  Screen: {len(img_b):,} bytes")
                         _stall = "screen"
                     self._pending_vision = (img_b, mime_t, user_text, angle)
@@ -1206,7 +1246,7 @@ class JarvisLive:
                 result = "Camera closed."
 
             elif name == "system_status":
-                r = await loop.run_in_executor(None, get_system_status)
+                r = await in_executor(loop,None, get_system_status)
                 result = str(r)
 
             elif name == "manage_monitor":
@@ -1235,8 +1275,9 @@ class JarvisLive:
                         except Exception:
                             pass
                     await asyncio.sleep(1.5)
-                    import os as _os
-                    _os._exit(0)
+                    self._shutdown_requested=True
+                    self._tasks.cancel_all();confirm_gate.cancel_pending()
+                    if self._reconnect_event:self._reconnect_event.set()
                 asyncio.create_task(_do_shutdown())
 
             elif self._action_registry.has(name):
@@ -1245,7 +1286,7 @@ class JarvisLive:
                     args["file_path"] = self.ui.current_file
                 _ctx = {"player": self.ui, "speak": self.speak,
                         "response": None, "session_memory": None}
-                r = await loop.run_in_executor(None, lambda: self._action_registry.run(name, args, _ctx))
+                r = await in_executor(loop,None, lambda: self._action_registry.run(name, args, _ctx))
                 result = r or "Done."
                 # web_search: mirror results to the on-screen content panel
                 if (name == "web_search" and r
@@ -1258,7 +1299,7 @@ class JarvisLive:
 
             else:
                 if self._plugin_registry.has(name):
-                    r = await loop.run_in_executor(
+                    r = await in_executor(loop,
                         None,
                         lambda: self._plugin_registry.run(name, args, player=self.ui, session_memory=None)
                     )
@@ -1274,7 +1315,7 @@ class JarvisLive:
         if not self.ui.muted:
             self.ui.set_state("LISTENING")
 
-        print(f"[JARVIS] 📤 {name} → {str(result)[:80]}")
+        print(f"[JARVIS] Tool returned: {name}; result redacted")
 
         # A tool that declared itself NON_BLOCKING also says when its answer may
         # re-enter the conversation. Without this the model finishes whatever it
@@ -1369,11 +1410,11 @@ class JarvisLive:
             # unless you are holding the key.
             if self._ptt_enabled and not self._ptt_held:
                 return
-            
+
             if not self.ui.muted and not self._phone_active:
                 data = indata.tobytes()
                 loop.call_soon_threadsafe(
-                    self.out_queue.put_nowait,
+                    offer_audio, self.out_queue,
                     {"data": data, "mime_type": "audio/pcm"}
                 )
                 # Feed the live mic level to the HUD so the waveform reacts to
@@ -1501,7 +1542,7 @@ class JarvisLive:
                             _audio_data = response.data
                             _SLICE = 2400
                             for _i in range(0, len(_audio_data), _SLICE):
-                                self.audio_in_queue.put_nowait(_audio_data[_i : _i + _SLICE])
+                                offer_audio(self.audio_in_queue, _audio_data[_i : _i + _SLICE])
 
                     if response.server_content:
                         sc = response.server_content
@@ -1583,20 +1624,49 @@ class JarvisLive:
                                     self.ui.stop_camera_stream()
                                 asyncio.create_task(_cam_close())
 
+                    cancelled=getattr(response,'tool_call_cancellation',None)
+                    if cancelled:
+                        self._tasks.cancel_calls(set(getattr(cancelled,'ids',[]) or []))
                     if response.tool_call:
-                        fn_responses = []
-                        for fc in response.tool_call.function_calls:
-                            print(f"[JARVIS] 📞 {fc.name}")
-                            fr = await self._execute_tool(fc)
-                            fn_responses.append(fr)
-                        await self.session.send_tool_response(
-                            function_responses=fn_responses
-                        )
-                        await self._flush_pending_vision()
+                        calls=list(response.tool_call.function_calls)
+                        session=self.session;epoch=self._session_epoch
+                        records=[self._tasks.submit(fc,epoch) for fc in calls]
+                        previous=getattr(self,'_delivery_tail',None)
+                        delivery=asyncio.create_task(self._deliver_tool_batch(session,epoch,calls,records,previous))
+                        self._delivery_tail=delivery
+                        self._deliveries.add(delivery)
+                        delivery.add_done_callback(self._deliveries.discard)
         except Exception as e:
             print(f"[JARVIS] ❌ Recv: {e}")
             traceback.print_exc()
             raise
+
+    def _task_progress(self, record):
+        text=f"Task {record.id} · {record.name} · {record.status}"
+        if record.detail: text += ' · '+record.detail
+        if hasattr(self.ui,'set_task_status'): self.ui.set_task_status(text)
+        self.ui.write_log('TASK: '+text)
+
+    async def _deliver_tool_batch(self,session,epoch,calls,records,previous=None):
+        outcomes=await asyncio.gather(*(rec.future for rec in records))
+        if previous:await asyncio.gather(asyncio.shield(previous),return_exceptions=True)
+        async with self._delivery_lock:
+            if self.session is not session or self._session_epoch!=epoch:return
+            responses=[]
+            for fc,outcome in zip(calls,outcomes):
+                if outcome.status=='completed':responses.append(outcome.value)
+                else:responses.append(types.FunctionResponse(id=fc.id,name=fc.name,
+                    response={'status':outcome.status,'result':outcome.error or 'Cancelled; any completed effects are recorded in task history.'}))
+            try:
+                await session.send_tool_response(function_responses=responses)
+                if not any(o.status!='completed' for o in outcomes):await self._flush_pending_vision()
+            except Exception:
+                self.ui.write_log('SYS: Tool responses retained in task history; session unavailable.')
+
+    async def _discard_unplayable_audio(self):
+        while True:
+            await self.audio_in_queue.get()
+            self.audio_in_queue.task_done()
 
     async def _play_audio(self):
         print("[JARVIS] 🔊 Play started")
@@ -1757,7 +1827,7 @@ class JarvisLive:
 
         # Start fetching news immediately — runs in parallel while phase 1 plays
         loop = asyncio.get_event_loop()
-        news_future = loop.run_in_executor(None, _fetch_news_sync, "top world news today")
+        news_future = in_executor(loop,None, _fetch_news_sync, "top world news today")
 
         await asyncio.sleep(0.3)
         if not self.session:
@@ -2046,7 +2116,7 @@ class JarvisLive:
                     )
                     self.ui.write_log(f"[Web]: {text}")
                 else:
-                    print(f"[Dashboard] Dropped command (no session): {text}")
+                    print("[Dashboard] Dropped command: no session; content redacted")
             except asyncio.TimeoutError:
                 pass
             except Exception as e:
@@ -2057,6 +2127,7 @@ class JarvisLive:
 
     async def run(self):
         self._loop = asyncio.get_event_loop()
+        self._delivery_lock = asyncio.Lock()
         self._reconnect_event = asyncio.Event()
 
         # ── Wire the shared core services to the interface ───────────────────
@@ -2091,7 +2162,7 @@ class JarvisLive:
             print(f"[Dashboard] Disabled: {e}")
             self._dashboard = None
 
-        while True:
+        while not self._shutdown_requested:
             try:
                 print("[JARVIS] Connecting...")
                 self.ui.set_state("THINKING")
@@ -2118,9 +2189,12 @@ class JarvisLive:
                     client.aio.live.connect(model=live_model, config=config) as session,
                     asyncio.TaskGroup() as tg,
                 ):
+                    self._session_epoch += 1
+                    self._tasks.new_session(self._session_epoch)
+                    self._delivery_tail = None
                     self.session          = session
-                    self.audio_in_queue   = asyncio.Queue()
-                    self.out_queue        = asyncio.Queue(maxsize=200)
+                    self.audio_in_queue   = asyncio.Queue(maxsize=40)
+                    self.out_queue        = asyncio.Queue(maxsize=20)
                     self._turn_done_event = asyncio.Event()
 
                     # Reset transient state that must not carry over from a previous session
@@ -2156,12 +2230,20 @@ class JarvisLive:
                     self._reconnect_event.clear()  # ignore requests from before this session
                     tg.create_task(self._watch_reconnect())
                     tg.create_task(self._send_realtime())
-                    tg.create_task(self._listen_audio())
+                    if sd is not None:
+                        tg.create_task(self._listen_audio())
+                    else:
+                        self.ui.write_log('SYS: Local microphone/speaker unavailable (PortAudio missing). Use text input; cloud conversation still requires a configured account.')
                     tg.create_task(self._receive_audio())
-                    tg.create_task(self._play_audio())
+                    if sd is not None:
+                        tg.create_task(self._play_audio())
+                    else:
+                        tg.create_task(self._discard_unplayable_audio())
                     tg.create_task(self._run_system_monitor())
-                    tg.create_task(self._run_background_monitor())
-                    tg.create_task(self._run_proactive_mode())
+                    from memory.config_manager import get_lightweight_mode
+                    if not get_lightweight_mode():
+                        tg.create_task(self._run_background_monitor())
+                        tg.create_task(self._run_proactive_mode())
                     tg.create_task(self._run_sleep_watch())
                     if self._dashboard:
                         tg.create_task(self._relay_phone_audio())
@@ -2178,6 +2260,7 @@ class JarvisLive:
             except SystemExit:
                 raise
             except BaseException as e:
+                if self._shutdown_requested:break
                 # Catches both Exception and BaseExceptionGroup (Python 3.11+
                 # TaskGroup raises BaseExceptionGroup when tasks are cancelled
                 # externally, which `except Exception` would miss, letting the
@@ -2289,7 +2372,11 @@ class JarvisLive:
                 else:
                     self._conn_backoff = 3
             finally:
+                self._tasks.cancel_all()
+                confirm_gate.cancel_pending()
                 self.session = None
+                for delivery in list(self._deliveries):delivery.cancel()
+                if self._deliveries:await asyncio.gather(*self._deliveries,return_exceptions=True)
                 # Only save if there was a real conversation (≥3 turns)
                 if len(self._session_log) >= 3:
                     asyncio.create_task(self._save_session_summary())
@@ -2303,8 +2390,21 @@ class JarvisLive:
             delay = getattr(self, "_conn_backoff", 3)
             print(f"[JARVIS] Reconnecting in {delay}s...")
             await asyncio.sleep(delay)
+        await self._tasks.close()
+        if self._dashboard:await self._dashboard.disable()
+        if self._ptt:self._ptt.stop()
+        if self._wake_detector:self._wake_detector.stop()
+        try:
+            from actions.browser_control import _registry
+            await asyncio.to_thread(_registry.close_all)
+        except ImportError:pass
+        self.ui.stop_camera_stream()
+        self.ui.stop_video()
+
 
 def main():
+    from core.redaction import install
+    install()
     ui = JarvisUI("face.png")
 
     def runner():

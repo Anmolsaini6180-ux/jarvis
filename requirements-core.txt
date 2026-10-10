@@ -1,0 +1,14 @@
+# Active Gemini Live desktop UI. No local LLM/STT/TTS or absent plugin extras.
+PyQt6>=6.6,<7
+sounddevice>=0.4,<1
+numpy>=1.24,<3
+google-genai==2.29.0
+requests>=2.31,<3
+pillow>=10,<13
+psutil>=5.9,<8
+keyring>=25,<26
+send2trash>=1.8,<2
+pyautogui>=0.9,<1
+pyperclip>=1.9,<2
+pywin32>=306; sys_platform == "win32"
+tzdata>=2024.1; sys_platform == "win32"

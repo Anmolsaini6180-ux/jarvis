@@ -11,11 +11,8 @@ def _platform_os() -> str:
     )
 
 def get_config() -> dict:
-    try:
-        with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
+    from memory.config_manager import load_api_keys
+    return load_api_keys()
 
 def get_os() -> str:
     """Returns: 'windows' | 'mac' | 'linux'"""

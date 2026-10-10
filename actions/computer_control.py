@@ -1,3 +1,5 @@
+from core.tasks import checkpoint, cancellable_sleep
+from core.native import cancellable_type
 #computer_control.py
 import io
 import json
@@ -16,11 +18,12 @@ import random
 from pathlib import Path
 
 try:
-    import pyautogui
+    from core.native import desktop_input
+    pyautogui = desktop_input()
     pyautogui.FAILSAFE = True
     pyautogui.PAUSE    = 0.05
     _PYAUTOGUI = True
-except ImportError:
+except (ImportError, KeyError, OSError):
     _PYAUTOGUI = False
 
 try:
@@ -40,10 +43,8 @@ _CONFIG_PATH  = _BASE / "config" / "api_keys.json"
 _MEMORY_PATH  = _BASE / "memory" / "long_term.json"
 
 def _load_config() -> dict:
-    try:
-        return json.loads(_CONFIG_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    from memory.config_manager import load_api_keys
+    return load_api_keys()
 
 def _platform_os() -> str:
     return {"Windows": "windows", "Darwin": "mac", "Linux": "linux"}.get(
@@ -55,29 +56,24 @@ def _get_os() -> str:
 
 
 def _get_api_key() -> str:
-    return _load_config().get("gemini_api_key", "")
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
-_SAFE_SCREENSHOT_ROOTS = (
-    Path.home(),
-)
 
 def _safe_screenshot_path(requested: str | None) -> Path:
-    fallback = Path.home() / "Desktop" / "jarvis_screenshot.png"
-    if not requested:
-        return fallback
-    try:
-        p = Path(requested).expanduser().resolve()
-        for root in _SAFE_SCREENSHOT_ROOTS:
-            if p.is_relative_to(root.resolve()):
-                p.parent.mkdir(parents=True, exist_ok=True)
-                return p
-    except Exception:
-        pass
-    return fallback
+    from core import path_policy
+    import uuid
+    p = path_policy.validate(requested) if requested else path_policy.default_workspace()/'Screenshots'/(uuid.uuid4().hex+'.png')
+    p = path_policy.validate(p)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    return p
 
 def _require_pyautogui():
+    checkpoint()
     if not _PYAUTOGUI:
-        raise RuntimeError("PyAutoGUI not installed. Run: pip install pyautogui")
+        raise RuntimeError("PyAutoGUI/desktop display unavailable. Run: pip install pyautogui")
 
 _FIRST_NAMES = [
     "Alex", "Jordan", "Taylor", "Morgan", "Casey", "Riley", "Drew", "Quinn",
@@ -147,7 +143,8 @@ def _user_profile() -> dict:
     """Read identity fields from long-term memory."""
     try:
         if _MEMORY_PATH.exists():
-            data     = json.loads(_MEMORY_PATH.read_text(encoding="utf-8"))
+            from memory.memory_manager import load_memory
+            data = load_memory()
             identity = data.get("identity", {})
             return {k: v.get("value", "") for k, v in identity.items()}
     except Exception:
@@ -156,8 +153,8 @@ def _user_profile() -> dict:
 
 def _type(text: str, interval: float = 0.03) -> str:
     _require_pyautogui()
-    time.sleep(0.3)
-    pyautogui.typewrite(text, interval=interval)
+    cancellable_sleep(0.3)
+    cancellable_type(text, interval=interval, keyboard=pyautogui)
     return f"Typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
@@ -165,16 +162,16 @@ def _smart_type(text: str, clear_first: bool = True) -> str:
     _require_pyautogui()
     if clear_first:
         _clear_field()
-        time.sleep(0.1)
+        cancellable_sleep(0.1)
 
     if len(text) > 20 and _PYPERCLIP:
         pyperclip.copy(text)
-        time.sleep(0.1)
+        cancellable_sleep(0.1)
         paste_key = "command" if _get_os() == "mac" else "ctrl"
         pyautogui.hotkey(paste_key, "v")
         return f"Smart-typed (clipboard): {text[:60]}{'…' if len(text) > 60 else ''}"
 
-    pyautogui.typewrite(text, interval=0.04)
+    cancellable_type(text, interval=0.04, keyboard=pyautogui)
     return f"Smart-typed: {text[:60]}{'…' if len(text) > 60 else ''}"
 
 
@@ -224,14 +221,14 @@ def _clipboard_get() -> str:
     if _PYPERCLIP:
         return pyperclip.paste()
     _hotkey("ctrl", "c")
-    time.sleep(0.2)
+    cancellable_sleep(0.2)
     return "(copied — pyperclip unavailable for read)"
 
 
 def _clipboard_paste(text: str) -> str:
     if _PYPERCLIP:
         pyperclip.copy(text)
-        time.sleep(0.1)
+        cancellable_sleep(0.1)
         _require_pyautogui()
         paste_key = "command" if _get_os() == "mac" else "ctrl"
         pyautogui.hotkey(paste_key, "v")
@@ -243,7 +240,9 @@ def _screenshot(save_path: str | None = None) -> str:
     _require_pyautogui()
     path = _safe_screenshot_path(save_path)
     img  = pyautogui.screenshot()
-    img.save(str(path))
+    from core import safe_files
+    buffer=io.BytesIO();img.save(buffer,format='PNG')
+    safe_files.write(path,buffer.getvalue(),overwrite=False)
     return f"Screenshot saved: {path}"
 
 
@@ -251,7 +250,7 @@ def _clear_field() -> str:
     _require_pyautogui()
     select_key = "command" if _get_os() == "mac" else "ctrl"
     pyautogui.hotkey(select_key, "a")
-    time.sleep(0.1)
+    cancellable_sleep(0.1)
     pyautogui.press("delete")
     return "Field cleared"
 
@@ -265,7 +264,7 @@ def _focus_window(title: str) -> str:
                 ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                 capture_output=True, timeout=5, **_WIN_HIDE,
             )
-            time.sleep(0.3)
+            cancellable_sleep(0.3)
             return f"Focused window: {title}"
         except Exception as e:
             return f"focus_window (Windows) failed: {e}"
@@ -280,7 +279,7 @@ def _focus_window(title: str) -> str:
                 ["osascript", "-e", script],
                 capture_output=True, timeout=5,
             )
-            time.sleep(0.3)
+            cancellable_sleep(0.3)
             return f"Focused window: {title}"
         except Exception as e:
             return f"focus_window (macOS) failed: {e}"
@@ -292,7 +291,7 @@ def _focus_window(title: str) -> str:
                 capture_output=True, timeout=5,
             )
             if result.returncode == 0:
-                time.sleep(0.3)
+                cancellable_sleep(0.3)
                 return f"Focused window: {title}"
         except FileNotFoundError:
             pass
@@ -301,7 +300,7 @@ def _focus_window(title: str) -> str:
                 ["xdotool", "search", "--name", title, "windowactivate"],
                 capture_output=True, timeout=5,
             )
-            time.sleep(0.3)
+            cancellable_sleep(0.3)
             return f"Focused window: {title}"
         except FileNotFoundError:
             return "focus_window (Linux) requires wmctrl or xdotool"
@@ -379,7 +378,7 @@ def computer_control(
       type          : data type for random_data
       field         : memory field name for user_data
       clear_first   : bool, clear field before typing (default: true)
-      path          : save path for screenshot (must be inside home dir)
+      path          : save path for screenshot (must be inside an approved workspace)
 
     Actions:
       type          — type text at cursor
@@ -412,7 +411,7 @@ def computer_control(
     if player:
         player.write_log(f"[Computer] {action}")
 
-    print(f"[ComputerControl] ▶ {action}  {params}")
+    print(f"[ComputerControl] {action}; parameters redacted")
 
     try:
 
@@ -474,7 +473,7 @@ def computer_control(
             desc   = params.get("description", "")
             coords = _screen_find(desc)
             if coords:
-                time.sleep(0.2)
+                cancellable_sleep(0.2)
                 _click(x=coords[0], y=coords[1])
                 return f"Clicked '{desc}' at {coords}"
             return f"Element not found on screen: '{desc}'"
@@ -482,7 +481,7 @@ def computer_control(
         if action == "wait":
             secs = float(params.get("seconds", 1.0))
             secs = min(secs, 30.0)
-            time.sleep(secs)
+            cancellable_sleep(secs)
             return f"Waited {secs}s"
 
         if action == "clear_field":
@@ -503,7 +502,7 @@ def computer_control(
             value   = profile.get(field, "")
             if not value:
                 value = _random_data(field)
-                print(f"[ComputerControl] ⚠️ No '{field}' in memory, using random: {value}")
+                print("[ComputerControl] No stored field found; generated test value redacted")
             return value
 
         return f"Unknown action: '{action}'"

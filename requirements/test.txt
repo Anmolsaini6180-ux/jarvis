@@ -1,0 +1,4 @@
+-r dashboard.txt
+httpx>=0.27,<1
+playwright>=1.40,<2
+defusedxml>=0.7,<1

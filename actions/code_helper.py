@@ -1,3 +1,4 @@
+from core.tasks import checkpoint
 from core import path_policy, safe_files
 from core.execution import ExecutionResult, run_generated
 import subprocess
@@ -24,8 +25,10 @@ from core import gemini
 
 
 def _get_api_key() -> str:
-    with open(API_CONFIG_PATH, "r", encoding="utf-8") as f:
-        return json.load(f)["gemini_api_key"]
+    from memory.config_manager import get_gemini_key
+    key=get_gemini_key()
+    if not key:raise RuntimeError('Gemini credential missing; configure via the local setup UI')
+    return key
 
 
 def _get_gemini(tier: str = gemini.SMART):
@@ -95,10 +98,16 @@ def _has_error(output) -> bool:
 
 def _take_screenshot() -> Path | None:
     try:
-        import pyautogui
-        screenshot_path = Path.home() / "Desktop" / f"jarvis_debug_{int(time.time())}.png"
+        from core.native import desktop_input
+        pyautogui = desktop_input()
+        import uuid
+        from core import path_policy
+        screenshot_path = path_policy.default_workspace() / 'Screenshots' / (uuid.uuid4().hex + '.png')
+        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
         screenshot = pyautogui.screenshot()
-        screenshot.save(str(screenshot_path))
+        import io
+        buffer=io.BytesIO();screenshot.save(buffer,format='PNG')
+        safe_files.write(screenshot_path,buffer.getvalue(),overwrite=False)
         print(f"[Code] 📸 Screenshot: {screenshot_path}")
         return screenshot_path
     except Exception as e:
@@ -180,7 +189,7 @@ Code:"""
     response = model.generate_content(prompt)
     code     = _clean_code(response.text)
     path     = _resolve_save_path(output_path, lang)
-    _save_file(path, code)
+    safe_files.write(path, code, overwrite=False)
     return code, path
 
 
@@ -237,6 +246,7 @@ def _build(description, language, output_path, args, timeout, speak=None, player
         if player:
             player.write_log(f"[Code] Attempt {attempt}...")
 
+        checkpoint()
         last_output = _run_file(path, args, timeout)
 
         if last_output.status in {'unavailable','timed_out','cancelled'}:
@@ -354,7 +364,7 @@ def _run_action(file_path, args, timeout, player) -> str:
         return f"File not found: {file_path}"
     if player:
         player.write_log(f"[Code] Running {p.name}...")
-    return _run_file(p, args, timeout)
+    return str(_run_file(p, args, timeout))
 
 
 def _optimize_action(file_path, code, language, output_path, player) -> str:
@@ -552,7 +562,7 @@ def code_helper(
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "code_helper",
-    "description": "Writes, edits, explains, runs, or builds code files.",
+    "description": "Generates, edits and explains scoped code files. Execution/build attempts require the isolated runner; unavailable isolation and successful exits are not functional verification. Screenshot analysis never auto-applies patches.",
     "parameters": {
         "type": "OBJECT",
         "properties": {

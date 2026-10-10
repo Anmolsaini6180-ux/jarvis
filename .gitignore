@@ -48,3 +48,18 @@ desktop.ini
 logs/
 downloads/
 screenshots/
+
+# Private recovery snapshots and test/build output
+config/recovery/
+artifacts/
+.pytest_cache/
+*.bak
+*.corrupt-*
+
+# Private transactional state, credentials and pairing data
+config/*.lock
+memory/*.lock
+config/*.json
+config/*.json.*
+config/credentials/
+config/reminders/

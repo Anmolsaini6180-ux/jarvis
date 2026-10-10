@@ -8,7 +8,7 @@ def weather_action(
     session_memory=None,
 ) -> str:
     city     = parameters.get("city")
-    when     = parameters.get("time", "today")  
+    when     = parameters.get("time", "today")
 
     if not city or not isinstance(city, str) or not city.strip():
         msg = "Sir, the city is missing for the weather report."
@@ -30,7 +30,7 @@ def weather_action(
         _log(msg, player)
         return msg
 
-    msg = f"Showing the weather for {city}, {when}, sir."
+    msg = f"Opened a weather search for {city}, {when}. No weather data was retrieved or verified; do not invent temperatures or forecasts."
     _log(msg, player)
 
     if session_memory:
@@ -54,10 +54,11 @@ def _log(message: str, player=None) -> None:
 # ── Tool declaration (auto-discovered by core/action_loader.py) ──────────────
 TOOL = {
     "name": "weather_report",
-    "description": "Gives the weather report to user",
+    "description": "Opens a weather search only. Does not retrieve grounded weather data; never invent forecast values.",
     "parameters": {
         "type": "OBJECT",
         "properties": {
+            "time": {"type":"STRING", "description":"Search time phrase, e.g. today"},
             "city": {
                 "type": "STRING",
                 "description": "City name"

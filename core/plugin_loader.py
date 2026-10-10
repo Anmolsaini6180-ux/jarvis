@@ -91,7 +91,9 @@ class PluginRegistry:
         if not get_plugin_enabled(name):
             return f"The '{name}' plugin is currently disabled."
         try:
-            return _call_run(rec.run, parameters, player, session_memory) or "Done."
+            from core.validation import validate_arguments
+            validate_arguments(parameters,rec.parameters)
+            return _call_run(rec.run, parameters, player, session_memory) or 'No result; outcome unverified.'
         except Exception as e:
             self._logger(f"Plugin '{name}' crashed during run(): {e}")
             self._notify(f"Plugin '{name}' failed — see the console for details.")
@@ -214,7 +216,7 @@ def _load_error(path: Path, plugins_dir: Path, exc: Exception) -> str:
                     f"'{helper}' into the same folder as {path.name} and restart.")
         if missing and missing[0] not in ("plugins",):
             return (f"Needs a package that is not installed: "
-                    f"pip install {missing[0]}")
+                    f"review the plugin dependency manifest for import {missing[0]} (import names are not package names)")
     return f"Failed to load: {exc}"
 
 
@@ -237,6 +239,10 @@ def discover_plugins(plugins_dir: Path, core_tool_names: set[str],
         if path.name.startswith("_"):
             continue
         try:
+            from core.plugin_trust import trusted
+            if not trusted(path):
+                all_records.append(PluginRecord(name=path.stem,file=path.name,error='TRUST_REQUIRED: review plugin and helper Python before import'))
+                continue
             module_name = f"plugins.{path.stem}"
             spec = importlib.util.spec_from_file_location(module_name, path)
             if spec is None or spec.loader is None:
