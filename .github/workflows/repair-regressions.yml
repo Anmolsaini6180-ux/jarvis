@@ -21,4 +21,5 @@ jobs:
           QT_QPA_PLATFORM: offscreen
       - run: python tools/smoke_sdk.py
       - run: python tools/smoke_ui.py
+      - run: python tools/smoke_runtime.py
       - run: python tools/diagnostics.py

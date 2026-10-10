@@ -1,3 +1,5 @@
+> Current voice behavior and acceptance limits: [Voice runtime repair](docs/VOICE_RUNTIME_REPAIR.md). This supersedes older voice setup guidance below.
+
 # Windows 10/11 setup and migration
 
 Use a normal user account, not an administrator terminal. This guide is for the repaired source; it does not assert that Windows/hardware/account tests have already passed. Python 3.12 was used for cloud verification.
@@ -115,3 +117,8 @@ git archive --format=zip --prefix=Mark-LV-repaired/ --output=..\Mark-LV-repaired
 ```
 
 Review uncommitted changes before packaging. Keep data backups separate. For local-only branch transfer, `git bundle create ..\Mark-LV-repairs.bundle --all` preserves commits; the supplied bundle also retains original baseline history. It contains no intended runtime configuration/data. Publishing cloud environment settings or pushing a branch is a separate user action; fresh-task restoration of local-only commits was not verified.
+
+
+## Voice runtime update (2026-10-10)
+
+Read [Voice runtime repair and Windows acceptance](docs/VOICE_RUNTIME_REPAIR.md) before using older voice guidance above. Audio lifetime, provider classification, PTT finalization, state/HUD controls and explicit SAPI diagnostics were changed. Wake dependencies now install through `setup.py --extras wake`; the UI downloads verified ONNX models and never invokes runtime pip. The supported pretrained phrase is **Hey Jarvis**, not plain Jarvis. Conversation remains Gemini Live; a limited typed local command fallback does not provide offline speech transcription/conversation. Physical Windows/audio/provider acceptance is pending. Exact changed files are in `VOICE_CHANGED_FILES.txt`.

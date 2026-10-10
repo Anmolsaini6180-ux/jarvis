@@ -419,3 +419,13 @@ def resolve(name: str, kind: str):
     except Exception as e:
         print(f"[Audio] resolve({kind}) failed: {e} — using system default")
         return None
+
+
+def stream_settings(device, kind):
+    """Enable WASAPI shared-mode conversion only on a WASAPI endpoint."""
+    import sounddevice as sd
+    info=sd.query_devices(device,kind)
+    api=sd.query_hostapis(info['hostapi'])
+    if 'wasapi' in api['name'].lower():
+        return sd.WasapiSettings(auto_convert=True)
+    return None

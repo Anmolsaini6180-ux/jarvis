@@ -5,7 +5,7 @@ import sys
 from pathlib import Path
 HERE = Path(__file__).resolve().parent
 GROUPS = {name: HERE / "requirements" / (name + ".txt") for name in
-          ("browser", "documents", "dashboard", "media", "windows", "test")}
+          ("browser", "documents", "dashboard", "media", "windows", "test", "wake")}
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)

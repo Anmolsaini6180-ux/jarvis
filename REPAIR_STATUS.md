@@ -42,3 +42,8 @@ Status labels: **fixed** = implementation addresses the reproduced/static defect
 | Setup reusable cloud configuration | environment draft; docs | tested isolated development venv, saved install/start instructions | See TEST_RESULTS and environment draft save | Local commits not pushed; future task restoration/publication not verified | mitigated |
 
 No finding is labelled not-reproduced to hide a verified issue. Missing real-driver/offline/acoustic capabilities are explicitly reported above rather than mocked as success.
+
+
+## Voice runtime update (2026-10-10)
+
+Read [Voice runtime repair and Windows acceptance](docs/VOICE_RUNTIME_REPAIR.md) before using older voice guidance above. Audio lifetime, provider classification, PTT finalization, state/HUD controls and explicit SAPI diagnostics were changed. Wake dependencies now install through `setup.py --extras wake`; the UI downloads verified ONNX models and never invokes runtime pip. The supported pretrained phrase is **Hey Jarvis**, not plain Jarvis. Conversation remains Gemini Live; a limited typed local command fallback does not provide offline speech transcription/conversation. Physical Windows/audio/provider acceptance is pending. Exact changed files are in `VOICE_CHANGED_FILES.txt`.

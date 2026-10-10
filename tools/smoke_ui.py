@@ -18,7 +18,22 @@ with tempfile.TemporaryDirectory(prefix='jarvis-ui-smoke-') as scratch:
         app._app.processEvents()
         assert 'cancelled' in app._win._task_status.text()
         assert 'STOP / CANCEL' in app._win._interrupt_btn.text()
-        assert app._win.findChildren(ui.QPushButton)
+        buttons=app._win.findChildren(ui.QPushButton)
+        for label in ['START LISTENING','STOP LISTENING','TEST MICROPHONE (LOCAL)','TEST VOICE (WINDOWS SAPI)','RETRY PROVIDER']:
+            assert any(button.text()==label for button in buttons)
+        activations=[]
+        app._win.on_start_listening=lambda:activations.append('start')
+        next(button for button in buttons if button.text()=='START LISTENING').click()
+        assert activations==['start']
+        from PyQt6.QtTest import QTest
+        from PyQt6.QtCore import Qt
+        held=[];app._win.ptt_hold=held.append
+        app._win._apply_ptt_shortcut(True)
+        QTest.keyPress(app._win._input,Qt.Key.Key_Space,Qt.KeyboardModifier.ControlModifier)
+        QTest.keyRelease(app._win._input,Qt.Key.Key_Space,Qt.KeyboardModifier.ControlModifier)
+        app._app.processEvents()
+        assert True in held and held[-1] is False,held
+        app._win._apply_ptt_shortcut(False)
         stops=[];app._win.on_interrupt=lambda:stops.append('stop')
         app._win._interrupt_btn.click();app._app.processEvents()
         assert stops==['stop']

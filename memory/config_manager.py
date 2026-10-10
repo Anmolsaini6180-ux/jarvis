@@ -338,9 +338,9 @@ def save_plugin_enabled(plugin_name: str,enabled: bool) -> None:
 
 def get_response_language():
     value=load_api_keys().get('response_language','auto')
-    return value if value in {'auto','english','hinglish'} else 'auto'
+    return value if value in {'auto','english','hinglish','hindi'} else 'auto'
 def save_response_language(value):
-    if value not in {'auto','english','hinglish'}:raise ValueError('Unsupported response preference')
+    if value not in {'auto','english','hinglish','hindi'}:raise ValueError('Unsupported response preference')
     save_config({'response_language':value})
 def get_lightweight_mode():return bool(load_api_keys().get('lightweight_mode',False))
 def save_lightweight_mode(enabled):save_config({'lightweight_mode':bool(enabled)})

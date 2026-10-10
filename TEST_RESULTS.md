@@ -67,3 +67,20 @@ Hosted CI definitions were added for Windows/Linux Python 3.12, but hosted jobs 
 ## Source delivery verification
 
 The tracked source ZIP passed `zipfile.ZipFile.testzip()` (CRC check), includes all four requested repair/setup documents, and excludes runtime configuration, recovery data, bytecode and virtual environments. Both original tracked image/avatar assets were compared byte-for-byte against baseline commit `59f65af` and preserved. `git bundle verify /workspace/artifacts/Mark-LV-repairs.bundle` passed; the bundle contains the local repair branch and complete history. These are packaging checks, not additional regression tests. The bundle history includes disposable test snapshots from an earlier repair commit; the final source ZIP excludes those snapshots. No push or publication was performed.
+
+
+## Voice runtime update — 2026-10-10
+
+Environment: Linux, Python 3.12.14, isolated development venv under workspace. No Windows audio devices, SAPI, Gemini credentials/account or real phone were available.
+
+- Original uploaded-source regression baseline: **83 tests passed** independently.
+- Updated full unittest suite: **104 tests passed** (83 previous + 21 voice regressions). New tests cover locked states/capability priority, exact local routing, real SDK objects with mocked auth/config/close/quota responses, HTTPX/DNS/TLS classification, actual run-loop auth/no-retry and six-attempt network cap with fake transport, mocked callback PCM dispatch, isolated device/optional failures, PTT end-marker ordering, mocked STOP/output abort, cleanup and atomic verified-resource wake setup with fake downloads/validator.
+- Compileall: passed for actions/core/memory/dashboard/main.py/ui.py/setup.py.
+- Actual offscreen HUD construction, Start Listening click and Qt Ctrl+Space press/release: passed. No physical microphone/speaker claim.
+- Actual offscreen main entry initialized/shut down with disposable configuration, missing credential, excluded hardware/dashboard: passed. No provider network call.
+- Actual google-genai 2.29.0 Live config/schema construction: passed for plain/tuned/enhanced configurations. No account call.
+- Diagnostic inventory executed: Python/UI/SDK imports passed; sounddevice native PortAudio load, device enumeration, missing credential and absent optional wake resources failed as expected in this environment. Hardware/account-dependent rows SKIPPED, not PASS.
+- Cross-target Windows wake pip resolution: NOT PASSED. pip evaluated the Linux-only tflite-runtime dependency marker on the Linux host and could not resolve it for Windows. Package metadata excludes that dependency on native Windows; native Windows installation is still untested. No unsafe dependency bypass was used to install wake support.
+- Physical microphone/speaker/PTT/wake/Notepad/AI/STT/SAPI/restart acceptance: **requires physical Windows/account validation**, not tested here. Exact plain Jarvis acoustic activation, full local STT/conversation, provider switching, a SAPI voice-picker UI and wake acknowledgment sound remain unimplemented.
+
+Initial restricted-sandbox runs stalled at cross-thread socket wakeups. Re-running with permitted networking allowed the local ASGI/async regression suite to finish; no live account test was substituted. See output verification logs and docs/VOICE_RUNTIME_REPAIR.md for acceptance/rollback.

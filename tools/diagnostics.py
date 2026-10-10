@@ -26,5 +26,10 @@ def diagnose(audio=False):
             report['audio_usable']=False;report['warnings'].append('Audio/device unavailable: '+type(e).__name__)
     return report
 if __name__=='__main__':
-    p=argparse.ArgumentParser();p.add_argument('--audio',action='store_true');args=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--audio',action='store_true');p.add_argument('--voice',action='store_true');args,extra=p.parse_known_args()
+    if args.voice:
+        import voice_diagnostics
+        sys.argv=[sys.argv[0]]+extra
+        raise SystemExit(voice_diagnostics.main())
+    if extra:p.error('Unrecognized arguments: '+' '.join(extra))
     print(json.dumps(diagnose(args.audio),indent=2))

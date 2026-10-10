@@ -1486,6 +1486,9 @@ class SetupOverlay(QWidget):
         """)
         init_btn.clicked.connect(self._submit)
         layout.addWidget(init_btn)
+        audio_btn=QPushButton('LOCAL AUDIO TESTS WITHOUT API KEY')
+        audio_btn.clicked.connect(self.hide)
+        layout.addWidget(audio_btn)
 
     def _sel(self, key: str):
         self._sel_os = key
@@ -3852,7 +3855,7 @@ class MainWindow(QMainWindow):
         super().resizeEvent(event)
         cw = self.centralWidget()
         if self._overlay and self._overlay.isVisible():
-            ow, oh = 460, 390
+            ow, oh = 460, 440
             self._overlay.setGeometry(
                 (cw.width()  - ow) // 2,
                 (cw.height() - oh) // 2,
@@ -4168,7 +4171,7 @@ class MainWindow(QMainWindow):
         lay.addWidget(history_btn)
         self._task_sig.connect(lambda text: self._task_recent.append(text) or (self._task_recent.pop(0) if len(self._task_recent)>100 else None))
         from memory.config_manager import get_response_language, save_response_language, get_lightweight_mode
-        language=QComboBox();language.addItems(['auto','english','hinglish']);language.setCurrentText(get_response_language())
+        language=QComboBox();language.addItems(['auto','english','hinglish','hindi']);language.setCurrentText(get_response_language())
         language.setToolTip('Response preference; code, proper names and numbers remain unchanged. Takes effect on reconnect.')
         language.currentTextChanged.connect(save_response_language)
         lay.addWidget(language)
@@ -4320,6 +4323,24 @@ class MainWindow(QMainWindow):
             lay.addWidget(button)
             return button
 
+        self._voice_capabilities_label=QLabel('Voice readiness pending')
+        self._voice_capabilities_label.setWordWrap(True)
+        self._voice_capabilities_label.setStyleSheet(f'color: {C.PRI}; background: transparent;')
+        lay.addWidget(self._voice_capabilities_label)
+        self._voice_status_timer=QTimer(self)
+        self._voice_status_timer.setInterval(1000)
+        def update_voice_status():
+            getter=getattr(self,'get_voice_capabilities',None)
+            if not getter:return
+            try:
+                status=getter()
+                self._voice_capabilities_label.setText('\n'.join(f'{key}: {value}' for key,value in status.items() if key!='ptt_scope'))
+                from memory.config_manager import get_push_to_talk_enabled
+                self._apply_ptt_shortcut(get_push_to_talk_enabled() and status['ptt_scope']=='window')
+            except Exception:self._voice_capabilities_label.setText('Voice status unavailable; inspect runtime log')
+        self._voice_status_timer.timeout.connect(update_voice_status)
+        self._voice_status_timer.start()
+
         fs_btn = _row(QPushButton("⛶  FULLSCREEN  [F11]"), self._BTN_DIM)
         fs_btn.clicked.connect(self._toggle_fullscreen)
 
@@ -4334,6 +4355,31 @@ class MainWindow(QMainWindow):
         self._wake_btn.setText("🎙  WAKE WORD")
         self._wake_btn.setStyleSheet(self._BTN_DIM)
         self._wake_sleep_btn.hide()
+
+        for label, callback in [
+            ('START LISTENING','on_start_listening'),
+            ('STOP LISTENING','on_stop_listening'),
+            ('TEST MICROPHONE (LOCAL)','on_test_microphone'),
+            ('TEST VOICE (WINDOWS SAPI)','on_test_voice'),
+            ('RETRY PROVIDER','on_retry_provider'),
+            ('UPDATE GEMINI CREDENTIAL','prompt_provider_config')]:
+            button=_row(QPushButton(label),self._BTN_DIM)
+            button.clicked.connect(lambda checked=False,name=callback: getattr(self,name,lambda:None)())
+
+        fallback=_row(QPushButton('CONFIGURE LOCAL SAPI FALLBACK'),self._BTN_DIM)
+        def configure_fallback():
+            from PyQt6.QtWidgets import QMessageBox
+            result=QMessageBox.question(self,'Local voice fallback','Enable Windows SAPI speech for local text commands and provider text replies that contain no audio? Existing Gemini voice remains selected.')
+            from memory.config_manager import save_config
+            save_config({'local_tts_fallback_enabled':result==QMessageBox.StandardButton.Yes})
+        fallback.clicked.connect(configure_fallback)
+        followup=_row(QPushButton('SET LISTENING WINDOW'),self._BTN_DIM)
+        def configure_followup():
+            from PyQt6.QtWidgets import QInputDialog
+            from memory.config_manager import save_config
+            seconds,ok=QInputDialog.getInt(self,'Listening window','Inactivity seconds (applied on restart)',30,5,300)
+            if ok:save_config({'follow_up_seconds':seconds})
+        followup.clicked.connect(configure_followup)
 
         self._ptt_btn = _row(QPushButton())
         self._ptt_btn.clicked.connect(self._toggle_ptt)
@@ -5219,39 +5265,35 @@ class MainWindow(QMainWindow):
         self._refresh_talk_btns()
 
     def _apply_ptt_shortcut(self, needed: bool):
-        """Bind the chord inside the window when no global hook is available.
-
-        On macOS and Linux there is no dependency-free way to read global key
-        state, so the chord is at least live whenever this window has focus.
-        Qt gives no key-release for a QShortcut, so a press latches the mic open
-        and a short timer closes it; held down, auto-repeat keeps pushing that
-        timer out, which behaves like holding a key.
-        """
-        from PyQt6.QtGui import QKeySequence, QShortcut
-        from core.hotkey import qt_sequence
-
+        """Use actual Qt press/release events when global Windows polling is unavailable."""
+        from PyQt6.QtCore import QObject,QEvent
+        app=QApplication.instance()
+        current=getattr(self,'_ptt_filter',None)
         if not needed:
-            sc = getattr(self, "_ptt_sc", None)
-            if sc is not None:
-                sc.setEnabled(False)
-                self._ptt_sc = None
-            self._ptt_hold(False)
+            if current is not None:
+                app.removeEventFilter(current)
+                current.deleteLater()
+                self._ptt_filter=None
+                self._ptt_hold(False)
             return
-        if getattr(self, "_ptt_sc", None) is not None:
-            return
-
-        self._ptt_release = QTimer(self)
-        self._ptt_release.setSingleShot(True)
-        self._ptt_release.setInterval(420)
-        self._ptt_release.timeout.connect(lambda: self._ptt_hold(False))
-
-        def _press():
-            self._ptt_hold(True)
-            self._ptt_release.start()
-
-        self._ptt_sc = QShortcut(QKeySequence(qt_sequence()), self)
-        self._ptt_sc.setAutoRepeat(True)
-        self._ptt_sc.activated.connect(_press)
+        if current is not None:return
+        window=self
+        class HoldFilter(QObject):
+            def eventFilter(self,watched,event):
+                kind=event.type()
+                if kind==QEvent.Type.ApplicationDeactivate:
+                    window._ptt_hold(False)
+                if kind in {QEvent.Type.ShortcutOverride,QEvent.Type.KeyPress}:
+                    if event.key()==Qt.Key.Key_Space and event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                        if kind==QEvent.Type.ShortcutOverride:event.accept()
+                        elif not event.isAutoRepeat():window._ptt_hold(True)
+                        return True
+                if kind==QEvent.Type.KeyRelease and not event.isAutoRepeat():
+                    if event.key() in {Qt.Key.Key_Space,Qt.Key.Key_Control}:
+                        window._ptt_hold(False)
+                return False
+        self._ptt_filter=HoldFilter(self)
+        app.installEventFilter(self._ptt_filter)
 
     def _ptt_hold(self, held: bool):
         """Report a windowed press/release to whoever owns the microphone."""
@@ -5555,8 +5597,8 @@ class MainWindow(QMainWindow):
             self._apply_state("MUTED")
             self._log.append_log("SYS: Microphone muted." + (f" {note}" if note else ""))
         else:
-            self._apply_state("LISTENING")
-            self._log.append_log("SYS: Microphone active." + (f" {note}" if note else ""))
+            self._apply_state(getattr(self,"get_runtime_state",lambda:"INITIALIZING")())
+            self._log.append_log("SYS: Microphone unmuted; capture readiness is reported separately." + (f" {note}" if note else ""))
 
     def _style_mute_btn(self):
         if self._muted:
@@ -5589,6 +5631,9 @@ class MainWindow(QMainWindow):
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
 
+    def prompt_provider_config(self):
+        self._show_setup()
+
     def _check_config(self) -> bool:
         if not API_FILE.exists(): return False
         try:
@@ -5600,7 +5645,7 @@ class MainWindow(QMainWindow):
     def _show_setup(self):
         ov = SetupOverlay(self.centralWidget())
         cw = self.centralWidget()
-        ow, oh = 460, 390
+        ow, oh = 460, 440
         ov.setGeometry(
             (cw.width()  - ow) // 2,
             (cw.height() - oh) // 2,
@@ -5621,9 +5666,10 @@ class MainWindow(QMainWindow):
         if self._overlay:
             self._overlay.hide()
             self._overlay = None
-        self._apply_state("LISTENING")
+        self._apply_state("INITIALIZING")
+        if getattr(self,"on_retry_provider",None):self.on_retry_provider()
         self._assistant_name = _read_full_config().get("assistant_name", "JARVIS") or "JARVIS"
-        self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} online.")
+        self._log.append_log(f"SYS: Initialised. OS={os_name.upper()}. {self._assistant_name} configuration saved; provider readiness pending.")
 
 
 class _RootShim:

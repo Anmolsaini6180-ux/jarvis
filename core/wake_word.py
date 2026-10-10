@@ -35,8 +35,8 @@ SAMPLE_RATE = 16000
 def is_installed() -> bool:
     """True if the openwakeword package is importable (no model check)."""
     try:
-        import importlib.util
-        return importlib.util.find_spec("openwakeword") is not None
+        from openwakeword.model import Model
+        return callable(Model)
     except Exception:
         return False
 
@@ -53,57 +53,68 @@ def is_ready() -> bool:
         return False
     try:
         import openwakeword
-        models_dir = Path(openwakeword.__file__).resolve().parent / "resources" / "models"
+        models_dir = model_directory()
         if not models_dir.is_dir():
             return False
-        has_wake = (any(models_dir.glob(f"{WAKE_MODEL}*.onnx"))
-                    or any(models_dir.glob(f"{WAKE_MODEL}*.tflite")))
-        has_mel = (any(models_dir.glob("melspectrogram*.onnx"))
-                   or any(models_dir.glob("melspectrogram*.tflite")))
-        has_emb = (any(models_dir.glob("embedding_model*.onnx"))
-                   or any(models_dir.glob("embedding_model*.tflite")))
+        has_wake = (any(p.stat().st_size > 1024 for p in models_dir.glob(f"{WAKE_MODEL}*.onnx")))
+        has_mel = (any(p.stat().st_size > 1024 for p in models_dir.glob("melspectrogram*.onnx")))
+        has_emb = (any(p.stat().st_size > 1024 for p in models_dir.glob("embedding_model*.onnx")))
         return bool(has_wake and has_mel and has_emb)
     except Exception:
         return False
 
 
-def install_and_download(logger: Callable[[str], None] = print,
-                         notify: Callable[[str], None] | None = None) -> tuple[bool, str]:
-    """
-    One-click setup for the UI button: pip-install openwakeword if missing, then
-    download the wake model. Returns (ok, message). Never raises — every failure
-    is reported through the returned message and the logger.
-    """
-    _tell = notify or (lambda _msg: None)
+_setup_lock = threading.Lock()
+
+def model_directory():
+    # Avoid OneDrive/site-packages conflicts without touching the existing path.
+    import os
+    root=Path(os.environ.get('LOCALAPPDATA',Path.home()/'.cache'))
+    return root/'Jarvis'/'wake-models'
+
+def install_and_download(logger=print, notify=None):
+    """Explicit model setup. Dependencies are installed by setup.py, never runtime pip."""
+    if not _setup_lock.acquire(False):return False,'Wake setup already in progress.'
     try:
         if not is_installed():
-            logger("Wake word: installing openwakeword (one-time)…")
-            _tell("Wake word: installing openwakeword (one-time)…")
-            r = subprocess.run(
-                [sys.executable, "-m", "pip", "install", "openwakeword"],
-                capture_output=True, text=True,
-            )
-            if r.returncode != 0:
-                tail = (r.stderr or r.stdout or "").strip().splitlines()[-1:] or [""]
-                return False, f"pip install failed: {tail[0][:160]}"
-        # Download the pretrained melspectrogram/embedding + wake models.
-        logger("Wake word: downloading models…")
-        _tell("Wake word: downloading models…")
-        try:
-            import openwakeword.utils as _u
-            try:
-                _u.download_models([WAKE_MODEL])
-            except TypeError:
-                _u.download_models()   # older signature downloads the default set
-        except Exception as e:
-            return False, f"model download failed: {e}"
-
-        if not is_ready():
-            return False, "installed, but the wake model could not be loaded."
-        logger("Wake word: ready.")
-        return True, "Wake word installed and ready."
+            return False,'openWakeWord import failed. Run .venv\\Scripts\\python.exe setup.py --extras wake, then restart.'
+        import tempfile
+        import os
+        import openwakeword
+        import requests
+        target=model_directory()
+        target.mkdir(parents=True,exist_ok=True)
+        if is_ready():return True,'Wake model files already present; engine initialization is checked on enable.'
+        with tempfile.TemporaryDirectory(prefix='download-',dir=target.parent) as temporary:
+            resources=list(openwakeword.FEATURE_MODELS.values())+[
+                value for key,value in openwakeword.MODELS.items() if 'jarvis' in key.lower()]
+            for resource in resources:
+                url=resource['download_url'].replace('.tflite','.onnx')
+                filename=url.rsplit('/',1)[-1]
+                if not filename.endswith('.onnx') or '/' in filename or '\\' in filename:
+                    raise ValueError('Unsupported resource name')
+                with requests.get(url,stream=True,timeout=(10,60)) as response:
+                    response.raise_for_status()
+                    total=0
+                    with (Path(temporary)/filename).open('wb') as output:
+                        for chunk in response.iter_content(65536):
+                            total+=len(chunk)
+                            if total>64*1024*1024:raise ValueError('Model resource too large')
+                            output.write(chunk)
+            files=list(Path(temporary).glob('*.onnx'))
+            required=['hey_jarvis','melspectrogram','embedding_model']
+            if not all(any(f.name.startswith(name) and f.stat().st_size>1024 for f in files) for name in required):
+                return False,'Downloaded ONNX model resources are incomplete.'
+            # Validate every ONNX resource before publishing it atomically.
+            import onnxruntime
+            for file in files:
+                onnxruntime.InferenceSession(str(file),providers=['CPUExecutionProvider'])
+            for file in files:os.replace(file,target/file.name)
+        return is_ready(),'Hey Jarvis model resources verified. Plain Jarvis requires a custom model.'
     except Exception as e:
-        return False, f"setup error: {e}"
+        logger('Wake setup failed: '+type(e).__name__)
+        return False,'Wake model setup failed: '+type(e).__name__+'. Check network, permissions and model directory.'
+    finally:_setup_lock.release()
 
 
 class WakeWordDetector:
@@ -128,15 +139,27 @@ class WakeWordDetector:
         self._running = False
         self._model = None
         self._ready = False
+        self._lifecycle_lock=threading.RLock()
 
     def start(self) -> bool:
+        with self._lifecycle_lock:
+            if self._thread and self._thread.is_alive():return self._running and self._ready
+            if _setup_lock.locked():return False
+            return self._start()
+
+    def _start(self) -> bool:
         """Load the model and spawn the inference thread. Returns True on success.
         Safe to call again — a no-op if already running. Never raises."""
         if self._running:
             return True
         try:
             from openwakeword.model import Model
-            self._model = Model(wakeword_models=[WAKE_MODEL], inference_framework="onnx")
+            directory=model_directory()
+            self._model = Model(
+                wakeword_models=[str(next(directory.glob('hey_jarvis*.onnx')))],
+                melspec_model_path=str(next(directory.glob('melspectrogram*.onnx'))),
+                embedding_model_path=str(next(directory.glob('embedding_model*.onnx'))),
+                inference_framework='onnx')
         except Exception as e:
             self._logger(f"Wake word: could not load model — {e}")
             self._notify("Wake word unavailable — use the WAKE NOW button.")
@@ -150,14 +173,22 @@ class WakeWordDetector:
         return True
 
     def stop(self) -> None:
+        with self._lifecycle_lock:self._stop()
+
+    def _stop(self) -> None:
         self._running = False
+        self._ready = False
         # unblock the thread if it's waiting on the queue
         try:
             self._queue.put_nowait(None)
         except Exception:
             pass
+        thread=self._thread
+        if thread and thread is not threading.current_thread():thread.join(timeout=2)
+        if thread and thread.is_alive():return
         self._model = None
         self._ready = False
+        self._thread=None
 
     @property
     def ready(self) -> bool:
@@ -179,6 +210,8 @@ class WakeWordDetector:
 
     def _loop(self) -> None:
         import numpy as np
+        cooldown_until=0.0
+        import time
         while self._running:
             try:
                 frame = self._queue.get()
@@ -191,11 +224,12 @@ class WakeWordDetector:
                     for k, v in scores.items():
                         if "jarvis" in k.lower():
                             score = max(score, float(v))
-                    if score == 0.0 and scores:
-                        score = max(float(v) for v in scores.values())
-                if score >= self._threshold:
+
+                if score >= self._threshold and time.monotonic()>=cooldown_until:
+                    cooldown_until=time.monotonic()+2
                     # drain any backlog so we don't double-fire on the same utterance
                     self._drain()
+                    self._model.reset()
                     try:
                         self._on_detect()
                     except Exception as e:

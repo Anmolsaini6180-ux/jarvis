@@ -1,3 +1,5 @@
+> Current voice behavior and acceptance limits: [Voice runtime repair](docs/VOICE_RUNTIME_REPAIR.md). This supersedes older voice setup guidance below.
+
 # Mark LV / Jarvis — repaired desktop assistant
 
 This is the repaired version of the uploaded Mark LV source. The existing Qt HUD, holographic avatar, Gemini Live conversation, browser tools, settings, memory and useful desktop actions remain. Windows 10/11 is the primary target; macOS/Linux paths are retained where practical. Verification was performed on a Linux cloud development machine, not on every supported platform.
@@ -47,3 +49,8 @@ Standalone Android, new business integrations and a learning platform remain sep
 ## License
 
 The original personal/non-commercial [Creative Commons BY-NC 4.0](https://creativecommons.org/licenses/by-nc/4.0/) licensing statement is retained. This repair does not change licensing or ownership.
+
+
+## Voice runtime update (2026-10-10)
+
+Read [Voice runtime repair and Windows acceptance](docs/VOICE_RUNTIME_REPAIR.md) before using older voice guidance above. Audio lifetime, provider classification, PTT finalization, state/HUD controls and explicit SAPI diagnostics were changed. Wake dependencies now install through `setup.py --extras wake`; the UI downloads verified ONNX models and never invokes runtime pip. The supported pretrained phrase is **Hey Jarvis**, not plain Jarvis. Conversation remains Gemini Live; a limited typed local command fallback does not provide offline speech transcription/conversation. Physical Windows/audio/provider acceptance is pending. Exact changed files are in `VOICE_CHANGED_FILES.txt`.
