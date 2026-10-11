@@ -20,7 +20,8 @@ def config_exists() -> bool:
     return CONFIG_FILE.exists()
 
 def save_api_keys(gemini_api_key: str) -> None:
-    save_config({'gemini_api_key':gemini_api_key.strip()})
+    from core.credential_input import validate_gemini_key
+    save_config({'gemini_api_key':validate_gemini_key(gemini_api_key)})
 
 def load_api_keys() -> dict:
     with storage.transaction(CONFIG_FILE):
@@ -86,6 +87,9 @@ def _secure_update(mutate):
 
 def save_config(fields):
     """Merge explicit settings; never reset unrelated user configuration."""
+    if 'gemini_api_key' in fields:
+        from core.credential_input import validate_gemini_key
+        fields = dict(fields, gemini_api_key=validate_gemini_key(fields['gemini_api_key']))
     return _secure_update(lambda data:data.update(fields))
 
 def get_gemini_key() -> str | None:
@@ -93,7 +97,8 @@ def get_gemini_key() -> str | None:
 
 def is_configured() -> bool:
     key = get_gemini_key()
-    return bool(key and len(key) > 15)
+    from core.credential_input import plausible
+    return plausible(key)
 
 
 def get_assistant_name() -> str:
@@ -265,7 +270,7 @@ def _save_flag(key: str,value) -> None:
 
 
 def get_brief_enabled() -> bool:
-    return load_api_keys().get("morning_brief_enabled", True)
+    return load_api_keys().get("morning_brief_enabled", False)
 
 
 def save_brief_enabled(enabled: bool) -> None:

@@ -1,3 +1,5 @@
+> **Round 2 (2026-10-11):** Current Live/credential/dashboard fixes and evidence are in [ROUND2_REPAIR_REPORT.md](ROUND2_REPAIR_REPORT.md). Use the external-venv instructions at the top of [WINDOWS_SETUP.md](../WINDOWS_SETUP.md). The sections below retain earlier repair history; conflicting setup/configuration claims are superseded.
+
 # Voice runtime repair and Windows acceptance
 
 This update edits the uploaded project rather than rewriting it. The user's complete-repair request governs this update; the attached handoff's one-phase-per-session instruction was treated as reference material. No AGENTS.md was present in the uploaded tree. Original files were backed up before edits. The original 83 regression tests passed independently on Python 3.12.14/Linux.

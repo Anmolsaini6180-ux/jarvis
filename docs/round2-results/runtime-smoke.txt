@@ -1,0 +1,54 @@
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+Fontconfig error: No writable cache directories
+[Audio] Unavailable: OSError. Run tools/diagnostics.py --audio.
+[Actions] Action loaded: browser_control (browser_control.py)
+[Actions] Action loaded: code_helper (code_helper.py)
+[Actions] Action loaded: computer_control (computer_control.py)
+[Actions] Action loaded: computer_settings (computer_settings.py)
+[Actions] Action loaded: desktop_control (desktop.py)
+[Actions] Action loaded: dev_agent (dev_agent.py)
+[Actions] Action loaded: file_controller (file_controller.py)
+[Actions] Action loaded: file_processor (file_processor.py)
+[Actions] Action loaded: flight_finder (flight_finder.py)
+[Actions] Action loaded: game_updater (game_updater.py)
+[Actions] Action loaded: open_app (open_app.py)
+[Actions] Action loaded: reminder (reminder.py)
+[Actions] Action loaded: send_message (send_message.py)
+[Actions] Action loaded: video_player (video_player.py)
+[Actions] Action loaded: weather_report (weather_report.py)
+[Actions] Action loaded: web_search (web_search.py)
+[Actions] Action loaded: workspace_scope (workspace_scope.py)
+[Actions] Action loaded: youtube_video (youtube_video.py)
+[Actions] Action discovery complete: 18 active.
+[Plugins] Plugin discovery complete: 0 active, 0 rejected, 0 total.
+[Dashboard] Disabled: excluded from smoke
+[JARVIS] Connecting...
+[JARVIS] Live model: models/gemini-3.1-flash-live-preview
+PASS: real entry point initialized and shut down cleanly without a credential. Audio/phone hardware excluded; no provider request made.

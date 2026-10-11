@@ -1,3 +1,54 @@
+# Current external-venv Windows setup — Round 2
+
+This section supersedes earlier project-local .venv commands below. Preserve both existing virtual environments and all private project data. Use a standard user PowerShell terminal, not administrator access.
+
+1. Close Jarvis and make a private backup of the original project, configuration, DPAPI ciphertext, memory, plugins, profiles, reminders, generated projects and recovery snapshots. Never upload that backup.
+2. Extract the new ZIP to a separate folder such as `C:\Users\SAINI\OneDrive\Desktop\Jarvis-repaired`; the ZIP contains a `Jarvis` subfolder. Do not overwrite the only working/private installation. Copy data deliberately, retaining matching encrypted credential references/ciphertext; do not copy old application Python files over repaired modules.
+3. Use the external venv explicitly. If it already exists, validate it; do not delete/recreate it. Creating a missing external environment:
+
+```powershell
+cd "C:\Users\SAINI\OneDrive\Desktop\Jarvis-repaired\Jarvis"
+$JarvisVenv = Join-Path $env:LOCALAPPDATA "Jarvis\venv312"
+$JarvisPython = Join-Path $JarvisVenv "Scripts\python.exe"
+if (-not (Test-Path $JarvisVenv)) { py -3.12 -m venv $JarvisVenv }
+& $JarvisPython -c "import sys; print(sys.version); assert sys.version_info[:2] == (3,12); assert sys.prefix != sys.base_prefix"
+& $JarvisPython setup.py --extras windows wake
+& $JarvisPython tools\diagnostics.py --audio
+& $JarvisPython main.py
+```
+
+Stop if any command fails and review the original failure. The known external venv is outside OneDrive; project-local `.venv` permission failures do not require deleting either environment. Optional full features:
+
+```powershell
+& $JarvisPython setup.py --extras browser documents dashboard media windows wake --browsers
+```
+
+`INSTALL_WINDOWS.ps1` and `RUN_WINDOWS.ps1` offer the same explicit external-venv workflow if your existing PowerShell policy permits scripts. No policy/administrator workaround is needed: direct Python commands above are sufficient.
+
+VS Code: open the extracted `Jarvis` folder, select `%LOCALAPPDATA%\Jarvis\venv312\Scripts\python.exe` via **Python: Select Interpreter**, then run the exact launch command:
+
+```powershell
+& "$env:LOCALAPPDATA\Jarvis\venv312\Scripts\python.exe" main.py
+```
+
+Save only the API credential in the HUD Update Gemini Credential/setup input. Never paste curl, JSON, headers or an example command. Plausible format does not prove authentication. Local Test Microphone/Test Voice work without a key. Wake phrase is **Hey Jarvis**; dependency installation is explicit and model download is a separate user-triggered HUD step.
+
+Provider isolation (SDK-only first, optional account requests second):
+
+```powershell
+& $JarvisPython tools\live_probe.py --out live_probe_local.json
+# Explicit provider requests, no microphone audio, no personal memory in diagnostic prompt:
+& $JarvisPython tools\live_probe.py --network --out live_probe_account.json
+# Explicit local hardware tests, no audio uploaded:
+& $JarvisPython tools\voice_diagnostics.py --mic-test 5 --tts-test --wake-test --hotkey-test --out hardware_report.json
+```
+
+A failed account probe does not disable local audio. Do not share private settings/key files or raw SDK tracebacks. Follow [Windows acceptance](docs/WINDOWS_ACCEPTANCE_ROUND2.md) and the [verified repair report](docs/ROUND2_REPAIR_REPORT.md).
+
+Rollback: close both versions. Relaunch the untouched backup using its original interpreter, or restore only the changed source files listed in ROUND2_CHANGED_FILES.md. Keep current data backups separately; never restore old data over newer data blindly. Both existing venvs are retained; if dependency rollback is needed, build a separate external venv for the prior source instead of deleting a working environment. No credential/data schema migration was added by Round 2. Existing secure migrations keep their verification/backups and require the same Windows user for DPAPI ciphertext.
+
+---
+
 > Current voice behavior and acceptance limits: [Voice runtime repair](docs/VOICE_RUNTIME_REPAIR.md). This supersedes older voice setup guidance below.
 
 # Windows 10/11 setup and migration

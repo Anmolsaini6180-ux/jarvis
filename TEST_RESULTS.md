@@ -1,3 +1,5 @@
+> **Round 2 (2026-10-11):** Current Live/credential/dashboard fixes and evidence are in [ROUND2_REPAIR_REPORT.md](docs/ROUND2_REPAIR_REPORT.md). Use the external-venv instructions at the top of [WINDOWS_SETUP.md](WINDOWS_SETUP.md). The sections below retain earlier repair history; conflicting setup/configuration claims are superseded.
+
 # Actual verification results
 
 Environment: Linux cloud machine, Python **3.12.14**. Dedicated test venv: `/workspace/marklv-testenv`. Results below are development evidence; they do not establish end-to-end Windows voice/account/container readiness. No real messages, paid/API conversations, real OS reminders, destructive user-file tests, firewall changes, service installations or publication were performed.

@@ -47,5 +47,14 @@ with tempfile.TemporaryDirectory(prefix='jarvis-ui-smoke-') as scratch:
         assert review.isReadOnly() and review.toPlainText()==detail
         assert '<untrusted plain text>' in review.toPlainText()
         app.hide_confirm();app._app.processEvents()
+        overlay=ui.SetupOverlay(app._win.centralWidget())
+        submitted=[];overlay.done.connect(lambda key,os_name:submitted.append(key))
+        overlay._key_input.setText('curl -H x-goog-api-key: AIza'+'DUMMY_'*5)
+        overlay._submit();assert not submitted and overlay._key_error.text()
+        overlay._key_input.setText('AIza'+'DUMMY_'*5)
+        overlay._submit();assert len(submitted)==1
+        app._win._muted=True;app._win._apply_state('LISTENING');assert app._win.hud.state=='MUTED'
+        app._win._muted=False;app._win._apply_state('LISTENING');assert app._win.hud.state=='LISTENING'
+        overlay.close()
         app._win.close();app._app.quit()
         print('PASS: HUD/avatar construction, task status, STOP control and full Unicode/plain-text confirmation. Video/audio excluded; no cloud account connection.')

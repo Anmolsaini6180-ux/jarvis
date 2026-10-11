@@ -54,11 +54,11 @@ class PersistenceTests(unittest.TestCase):
   original=cm.CONFIG_FILE.read_bytes()
   with patch.object(credentials,'backend',side_effect=credentials.CredentialUnavailable('locked')),warnings.catch_warnings():
    warnings.simplefilter('ignore');self.assertEqual(cm.get_gemini_key(),'legacy-test-key')
-   with self.assertRaises(credentials.CredentialUnavailable):cm.save_api_keys('new-test-key')
+   with self.assertRaises(credentials.CredentialUnavailable):cm.save_api_keys('AIza'+'DUMMY_'*5)
   self.assertEqual(cm.CONFIG_FILE.read_bytes(),original)
  def test_secure_backend_write_failure_preserves_config(self):
   cm.CONFIG_FILE.write_text(json.dumps({'setting':1}));v=Vault();v.set=lambda *a: (_ for _ in ()).throw(credentials.CredentialUnavailable('failed'))
-  with patch.object(credentials,'backend',return_value=v),self.assertRaises(credentials.CredentialUnavailable):cm.save_api_keys('fake-key')
+  with patch.object(credentials,'backend',return_value=v),self.assertRaises(credentials.CredentialUnavailable):cm.save_api_keys('AIza'+'DUMMY_'*5)
   self.assertEqual(storage.read(cm.CONFIG_FILE),{'setting':1})
  def test_concurrent_settings(self):
   with patch.object(credentials,'backend',return_value=Vault()),concurrent.futures.ThreadPoolExecutor(8) as pool:

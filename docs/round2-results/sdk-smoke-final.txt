@@ -1,0 +1,4 @@
+[Audio] Unavailable: OSError. Run tools/diagnostics.py --audio.
+PASS: actual LiveConnectConfig; enhanced=False, tuned=False, tools=27. No API request.
+PASS: actual LiveConnectConfig; enhanced=False, tuned=True, tools=27. No API request.
+PASS: actual LiveConnectConfig; enhanced=True, tuned=True, tools=27. No API request.

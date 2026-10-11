@@ -19,6 +19,9 @@ jobs:
       - run: python -m unittest discover -s tests -v
         env:
           QT_QPA_PLATFORM: offscreen
+      - run: python tools/live_probe.py --out live_probe.json
+      - run: python tools/check_dashboard_js.py
+      - run: python tools/check_dashboard_crypto.py
       - run: python tools/smoke_sdk.py
       - run: python tools/smoke_ui.py
       - run: python tools/smoke_runtime.py

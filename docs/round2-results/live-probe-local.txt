@@ -1,0 +1,3 @@
+[Audio] Unavailable: OSError. Run tools/diagnostics.py --audio.
+PASS: SDK setup serialization — Actual pinned SDK; model=models/gemini-3.1-flash-live-preview, api=v1beta; no account claim.
+SKIPPED: REST/Live account probes — Use --network explicitly; no microphone audio is sent.

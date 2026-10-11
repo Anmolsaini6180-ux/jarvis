@@ -1,0 +1,12 @@
+[
+  {
+    "check": "SDK setup serialization",
+    "status": "PASS",
+    "detail": "Actual pinned SDK; model=models/gemini-3.1-flash-live-preview, api=v1beta; no account claim."
+  },
+  {
+    "check": "REST/Live account probes",
+    "status": "SKIPPED",
+    "detail": "Use --network explicitly; no microphone audio is sent."
+  }
+]

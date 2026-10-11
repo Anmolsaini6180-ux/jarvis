@@ -20,6 +20,15 @@ def classify(exc):
     if isinstance(exc,BaseExceptionGroup):
         errors=[classify(e) for e in exc.exceptions]
         return next((e for e in errors if not e.retryable),errors[0])
+    from core.credential_input import InvalidCredential
+    if isinstance(exc,InvalidCredential):return Failure('CREDENTIAL_FORMAT',False,'Credential format invalid. Paste a single Gemini API key in Settings; no request was sent.')
+    from websockets.exceptions import InvalidHeaderValue, InvalidStatus
+    if isinstance(exc,InvalidHeaderValue):return Failure('CREDENTIAL_FORMAT',False,'Invalid provider HTTP header. Check that the credential contains only a single API key.')
+    if isinstance(exc,InvalidStatus):
+        status=getattr(exc.response,'status_code',0)
+        if status in {401,403}:return Failure('AUTH' if status==401 else 'FORBIDDEN',False,'Provider handshake authorization rejected. Check key and account access.')
+        if status==429:return Failure('QUOTA',True,'Provider handshake rate limited.')
+        if status>=500:return Failure('NETWORK',True,'Provider handshake temporarily unavailable.')
     if isinstance(exc,MissingCredential):return Failure('MISSING_CREDENTIAL',False,'Gemini credential is missing. Configure it locally; audio tests remain available.')
     if isinstance(exc,LiveSetupRejected):return Failure('CONFIG',False,'Live setup was not acknowledged; conversational readiness is unavailable.')
     code=getattr(exc,'code',None)

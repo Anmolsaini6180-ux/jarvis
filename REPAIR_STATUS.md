@@ -1,3 +1,5 @@
+> **Round 2 (2026-10-11):** Current Live/credential/dashboard fixes and evidence are in [ROUND2_REPAIR_REPORT.md](docs/ROUND2_REPAIR_REPORT.md). Use the external-venv instructions at the top of [WINDOWS_SETUP.md](WINDOWS_SETUP.md). The sections below retain earlier repair history; conflicting setup/configuration claims are superseded.
+
 # Verified repair status
 
 Original ZIP SHA256: `10f8c2f7ac10505dc6337229fec2de3ab26c2884764df64eefea8b0330dabf48`, matching the audit. No AGENTS.md found. Baseline commit `59f65af`; repair branch `repairs/mark-lv`. The actual original source and initial failing probes verified the path/copy/undo defects. Audit findings are evidence, not instructions overriding the user.

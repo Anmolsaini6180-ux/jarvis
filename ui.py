@@ -1445,6 +1445,10 @@ class SetupOverlay(QWidget):
             QLineEdit:focus {{ border: 1px solid {C.PRI}; }}
         """)
         layout.addWidget(self._key_input)
+        self._key_error = QLabel('')
+        self._key_error.setWordWrap(True)
+        self._key_error.setStyleSheet(f'color: {C.RED}; background: transparent;')
+        layout.addWidget(self._key_error)
         layout.addSpacing(12)
 
         sep2 = QFrame(); sep2.setFrameShape(QFrame.Shape.HLine)
@@ -1512,13 +1516,12 @@ class SetupOverlay(QWidget):
                 """)
 
     def _submit(self):
-        key = self._key_input.text().strip()
-        if not key:
-            self._key_input.setStyleSheet(
-                self._key_input.styleSheet() +
-                f" QLineEdit {{ border: 1px solid {C.RED}; }}"
-            )
+        from core.credential_input import validate_gemini_key, InvalidCredential
+        try:key = validate_gemini_key(self._key_input.text())
+        except InvalidCredential as error:
+            self._key_error.setText(str(error))
             return
+        self._key_error.clear()
         self.done.emit(key, self._sel_os)
 
 
@@ -4341,6 +4344,13 @@ class MainWindow(QMainWindow):
         self._voice_status_timer.timeout.connect(update_voice_status)
         self._voice_status_timer.start()
 
+        proactive_btn=_row(QPushButton('CONFIGURE PROACTIVE CHECK-INS'),self._BTN_DIM)
+        def configure_proactive():
+            from PyQt6.QtWidgets import QMessageBox
+            from memory.config_manager import save_config
+            enabled=QMessageBox.question(self,'Proactive check-ins','Enable occasional assistant check-ins while awake? Muted mode and quiet hours (default 22:00–08:00) suppress them.')==QMessageBox.StandardButton.Yes
+            save_config({'proactive_checkins_enabled':enabled})
+        proactive_btn.clicked.connect(configure_proactive)
         fs_btn = _row(QPushButton("⛶  FULLSCREEN  [F11]"), self._BTN_DIM)
         fs_btn.clicked.connect(self._toggle_fullscreen)
 
@@ -5142,7 +5152,7 @@ class MainWindow(QMainWindow):
                 s = self.wake_get_state()
                 return {"ready": bool(s.get("ready")),
                         "enabled": bool(s.get("enabled")),
-                        "awake": bool(s.get("awake"))}
+                        "awake": bool(s.get("awake")), "running":bool(s.get("running")), "status":s.get("status","READY")}
             except Exception:
                 pass
         # Before JarvisLive has wired its callback (drawer built at startup).
@@ -5175,7 +5185,7 @@ class MainWindow(QMainWindow):
             self._wake_btn.setStyleSheet(_off)
             self._wake_sleep_btn.hide()
         elif st["enabled"]:
-            self._wake_btn.setText("🎙  WAKE WORD: ON")
+            self._wake_btn.setText("🎙  WAKE: "+st.get("status","READY"))
             self._wake_btn.setStyleSheet(_on)
             self._wake_sleep_btn.show()
             self._wake_sleep_btn.setText("😴  SLEEP NOW" if st["awake"] else "👂  WAKE NOW")
@@ -5628,6 +5638,7 @@ class MainWindow(QMainWindow):
             threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start()
 
     def _apply_state(self, state: str):
+        if self._muted and state != 'STOPPED':state='MUTED'
         self.hud.state    = state
         self.hud.speaking = (state == "SPEAKING")
 
@@ -5638,7 +5649,8 @@ class MainWindow(QMainWindow):
         if not API_FILE.exists(): return False
         try:
             d = _read_full_config()
-            return bool(d.get("gemini_api_key")) and bool(d.get("os_system"))
+            from core.credential_input import plausible
+            return plausible(d.get("gemini_api_key")) and bool(d.get("os_system"))
         except Exception:
             return False
 

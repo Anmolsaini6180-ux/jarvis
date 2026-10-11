@@ -1,0 +1,2264 @@
+[
+  {
+    "path": ".github/workflows/repair-regressions.yml",
+    "lines": 25,
+    "sha256": "c939bf9abf95fe2e0603c045bf96aa0773cb7f799f12d4aa51d7152071aa8d58"
+  },
+  {
+    "path": "CHANGELOG_REPAIRS.md",
+    "lines": 64,
+    "sha256": "bec64ecb71b92d21a827b9b162782436afe3a27050c6a7cda3407d07c0fb11a0"
+  },
+  {
+    "path": "HANDOFF_PROMPT.md",
+    "lines": 41,
+    "sha256": "a92a878c1b0e0b1e6af11ed0b3f69841f02b4af639a1e481ef4dff4011075e12"
+  },
+  {
+    "path": "INSTALL_WINDOWS.ps1",
+    "lines": 19,
+    "sha256": "9cbc5fa345147d24f60277714bfad3d094a2073ed3af36f5986295a5dd6e8788"
+  },
+  {
+    "path": "REPAIR_STATUS.md",
+    "lines": 49,
+    "sha256": "a93f0e0a423379b23a9cbbad0fec969500153cd8f6afb6d18cb7c00653d0b76d"
+  },
+  {
+    "path": "RUN_WINDOWS.ps1",
+    "lines": 7,
+    "sha256": "1b88f0f3a5a11a10caeacfbc157ba9d57dc154ddcbfb5b9b01d90ec22ef1b5c7"
+  },
+  {
+    "path": "TEST_RESULTS.md",
+    "lines": 86,
+    "sha256": "fb8eb0286abc4f404cd9a21713c976fea4c447fea38183499b9555ec3c2498a1"
+  },
+  {
+    "path": "VOICE_CHANGED_FILES.txt",
+    "lines": 26,
+    "sha256": "cabfbf0a676798161448bdd87f8fda5effa1e6bba29684a1145d3cf73bf6fd3c"
+  },
+  {
+    "path": "VOICE_REPAIR_PROGRESS.md",
+    "lines": 74,
+    "sha256": "2dd0acb48655b3cee60702beaba29fea9b6ddfe96e3a486be0de8987ff0faaff"
+  },
+  {
+    "path": "WINDOWS_SETUP.md",
+    "lines": 124,
+    "sha256": "a2a292113664eeb48ebfc289882407f945b159034c06ede908503b29a121554d"
+  },
+  {
+    "path": "actions/background_monitor.py",
+    "lines": 168,
+    "sha256": "aa4862a641406fccc2451286a1326cf7bd60885ae708bbf3443fdb9e5fa5d5dc",
+    "definitions": [
+      "_is_blocked",
+      "_slug",
+      "_title_hash",
+      "_load",
+      "_save",
+      "add_monitor",
+      "remove_monitor",
+      "list_monitors",
+      "check_all",
+      "_monitor_transaction"
+    ],
+    "boundary_calls": [
+      "_load",
+      "_load().items",
+      "load_memory",
+      "load_memory().get"
+    ]
+  },
+  {
+    "path": "actions/browser_control.py",
+    "lines": 1154,
+    "sha256": "39d04ea3369e025f276d2e7a2f384a151493095ff959bf0e367b23aa31608918",
+    "definitions": [
+      "_normalize_url",
+      "_user_agent",
+      "_real_profile_dir",
+      "_firefox_profile_dir",
+      "_find_opera_windows",
+      "_find_exe_windows",
+      "_resolve_browser",
+      "_detect_default_browser",
+      "_open_native",
+      "_BrowserSession",
+      "_SessionRegistry",
+      "browser_control",
+      "_log"
+    ],
+    "boundary_calls": [
+      "asyncio.run_coroutine_threadsafe",
+      "asyncio.run_coroutine_threadsafe(self._async_close(), self._loop).result",
+      "ini.read_text",
+      "ini.read_text(encoding='utf-8', errors='ignore').splitlines",
+      "page.reload",
+      "player.write_log",
+      "safe_files.write",
+      "self._ready.set",
+      "self._ready.wait",
+      "self._thread.is_alive",
+      "self._thread.start",
+      "sess.reload",
+      "subprocess.Popen",
+      "subprocess.run",
+      "subprocess.run(['defaults', 'read', 'com.apple.LaunchServices/com.apple.launchservices.secure', 'LSHandlers'], capture_output=True, text=True, timeout=5).stdout.lower",
+      "subprocess.run(['xdg-settings', 'get', 'default-web-browser'], capture_output=True, text=True, timeout=5).stdout.lower",
+      "threading.Event",
+      "threading.Lock",
+      "threading.Thread"
+    ]
+  },
+  {
+    "path": "actions/code_helper.py",
+    "lines": 607,
+    "sha256": "ec3cf6919dda47d181b4654542ff3c18eb0fb2db870fe4ccb15610dc631b1298",
+    "definitions": [
+      "get_base_dir",
+      "_get_api_key",
+      "_get_gemini",
+      "_clean_code",
+      "_resolve_save_path",
+      "_read_file",
+      "_save_file",
+      "_preview",
+      "_has_error",
+      "_take_screenshot",
+      "_image_to_base64",
+      "_detect_intent",
+      "_write",
+      "_fix_code",
+      "_run_file",
+      "_build",
+      "_write_action",
+      "_edit_action",
+      "_explain_action",
+      "_run_action",
+      "_optimize_action",
+      "_screen_debug_action",
+      "code_helper"
+    ],
+    "boundary_calls": [
+      "ExecutionResult",
+      "_read_file",
+      "_write",
+      "_write_action",
+      "base64.b64encode(path.read_bytes()).decode",
+      "p.read_text",
+      "path.read_bytes",
+      "player.write_log",
+      "safe_files.write",
+      "screenshot_path.read_bytes",
+      "screenshot_path.unlink"
+    ]
+  },
+  {
+    "path": "actions/computer_control.py",
+    "lines": 588,
+    "sha256": "46d05fc3e3f08ac6b3febed263a9a580cfd141d13a10bec49f04d21046852d70",
+    "definitions": [
+      "_base_dir",
+      "_load_config",
+      "_platform_os",
+      "_get_os",
+      "_get_api_key",
+      "_safe_screenshot_path",
+      "_require_pyautogui",
+      "_random_data",
+      "_user_profile",
+      "_type",
+      "_smart_type",
+      "_click",
+      "_hotkey",
+      "_press",
+      "_scroll",
+      "_move",
+      "_drag",
+      "_clipboard_get",
+      "_clipboard_paste",
+      "_screenshot",
+      "_clear_field",
+      "_focus_window",
+      "_screen_find",
+      "computer_control"
+    ],
+    "boundary_calls": [
+      "_load_config",
+      "_load_config().get",
+      "_load_config().get('os_system', _platform_os()).lower",
+      "load_api_keys",
+      "load_memory",
+      "player.write_log",
+      "safe_files.write",
+      "subprocess.run"
+    ]
+  },
+  {
+    "path": "actions/computer_settings.py",
+    "lines": 980,
+    "sha256": "e63d5e8c834ce727207690b3027ab6044818013be1d2f3054f5e581ecca4dbdb",
+    "definitions": [
+      "_get_base_dir",
+      "_get_api_key",
+      "_get_macos_wifi_interface",
+      "volume_up",
+      "volume_down",
+      "volume_mute",
+      "_windows_volume_endpoint",
+      "volume_get",
+      "brightness_get",
+      "brightness_set",
+      "volume_set",
+      "brightness_up",
+      "brightness_down",
+      "close_app",
+      "close_window",
+      "full_screen",
+      "minimize_window",
+      "maximize_window",
+      "snap_left",
+      "snap_right",
+      "switch_window",
+      "show_desktop",
+      "open_task_manager",
+      "focus_search",
+      "pause_video",
+      "refresh_page",
+      "close_tab",
+      "new_tab",
+      "next_tab",
+      "prev_tab",
+      "go_back",
+      "go_forward",
+      "zoom_in",
+      "zoom_out",
+      "zoom_reset",
+      "find_on_page",
+      "reload_page_n",
+      "scroll_up",
+      "scroll_down",
+      "scroll_top",
+      "scroll_bottom",
+      "page_up",
+      "page_down",
+      "copy",
+      "paste",
+      "cut",
+      "undo",
+      "redo",
+      "select_all",
+      "save_file",
+      "press_enter",
+      "press_escape",
+      "press_key",
+      "type_text",
+      "take_screenshot",
+      "lock_screen",
+      "open_system_settings",
+      "open_file_explorer",
+      "sleep_display",
+      "open_run",
+      "dark_mode",
+      "toggle_wifi",
+      "restart_computer",
+      "shutdown_computer",
+      "_normalise",
+      "_detect_action",
+      "_suggest",
+      "_guarded_setting_undo",
+      "computer_settings"
+    ],
+    "boundary_calls": [
+      "confirm.request",
+      "ctypes.windll.user32.SendMessageW",
+      "player.write_log",
+      "reload_page_n",
+      "subprocess.Popen",
+      "subprocess.run",
+      "subprocess.run(['brightnessctl', 'get'], capture_output=True, text=True, timeout=5).stdout.strip",
+      "subprocess.run(['brightnessctl', 'max'], capture_output=True, text=True, timeout=5).stdout.strip"
+    ]
+  },
+  {
+    "path": "actions/desktop.py",
+    "lines": 441,
+    "sha256": "1cc2e95742895f65ed97b082fc63b48209cc8c3732776a6a4dec3162e0eba831",
+    "definitions": [
+      "_get_base_dir",
+      "_get_api_key",
+      "_get_desktop",
+      "_build_sandbox",
+      "_execute_generated_code",
+      "_ask_gemini_for_desktop_action",
+      "set_wallpaper",
+      "set_wallpaper_from_url",
+      "get_current_wallpaper",
+      "organize_desktop",
+      "list_desktop",
+      "clean_desktop",
+      "get_desktop_stats",
+      "desktop_control",
+      "_checked_process"
+    ],
+    "boundary_calls": [
+      "_execute_generated_code",
+      "json.loads",
+      "params.get('task', '').strip",
+      "player.write_log",
+      "response.read",
+      "safe_files.write",
+      "subprocess.CompletedProcess",
+      "urllib.request.urlopen"
+    ]
+  },
+  {
+    "path": "actions/dev_agent.py",
+    "lines": 585,
+    "sha256": "ffbe2e399f3b3052296c1196a7bc1d8a7f5bf7c76d4e49e56be8ac8ef7136f92",
+    "definitions": [
+      "get_base_dir",
+      "_get_api_key",
+      "_get_model",
+      "_strip_fences",
+      "_is_rate_limit",
+      "_parse_traceback",
+      "_classify_error",
+      "_has_error",
+      "RateLimitError",
+      "_plan_project",
+      "_write_file",
+      "_install_dependencies",
+      "_open_vscode",
+      "_run_project",
+      "_try_auto_install",
+      "_fix_files",
+      "_build_project",
+      "dev_agent",
+      "_dependency_order"
+    ],
+    "boundary_calls": [
+      "_write_file",
+      "json.loads",
+      "player.write_log",
+      "safe_files.write",
+      "subprocess.Popen"
+    ]
+  },
+  {
+    "path": "actions/file_controller.py",
+    "lines": 616,
+    "sha256": "b93362bf9fc894486d535b933e7096091b81f8a81c4e355be12ed9056c8bbdc2",
+    "definitions": [
+      "_undo_move",
+      "_undo_create",
+      "_restore_from_trash",
+      "_is_safe_path",
+      "_validate",
+      "_get_desktop",
+      "_get_downloads",
+      "_get_documents",
+      "_get_pictures",
+      "_get_music",
+      "_get_videos",
+      "_resolve_path",
+      "_format_size",
+      "_safe_trash",
+      "list_files",
+      "create_file",
+      "create_folder",
+      "delete_file",
+      "move_file",
+      "copy_file",
+      "rename_file",
+      "read_file",
+      "write_file",
+      "find_files",
+      "get_largest_files",
+      "get_disk_usage",
+      "organize_desktop",
+      "get_file_info",
+      "file_controller"
+    ],
+    "boundary_calls": [
+      "_get_downloads",
+      "delete_file",
+      "player.write_log",
+      "read_file",
+      "safe_files.write",
+      "send2trash.send2trash",
+      "target.read_text",
+      "target.unlink",
+      "write_file"
+    ]
+  },
+  {
+    "path": "actions/file_processor.py",
+    "lines": 919,
+    "sha256": "cac38c90e7e1a7d6151dd9fc2ccdd661dba0b0624d32b7d0f9bb103bb8096ef4",
+    "definitions": [
+      "_get_api_key",
+      "_gemini_client",
+      "_detect_type",
+      "_file_size_str",
+      "_output_path",
+      "_process_image",
+      "_process_pdf",
+      "_process_text_doc",
+      "_process_data",
+      "_process_json",
+      "_process_code",
+      "_process_audio",
+      "_process_video",
+      "_process_archive",
+      "_process_pptx",
+      "file_processor",
+      "_checked_process",
+      "_process_xml"
+    ],
+    "boundary_calls": [
+      "_read_content",
+      "_read_pptx_text",
+      "json.loads",
+      "path.read_bytes",
+      "path.read_text",
+      "pd.read_csv",
+      "pd.read_excel",
+      "player.write_log",
+      "safe_files.write",
+      "subprocess.CompletedProcess",
+      "tmp_audio.unlink",
+      "{'describe': 'Describe this image in detail.', 'ocr': 'Extract all text visible in this image. Return only the text, formatted clearly.', 'analyze': 'Analyze this image thoroughly: objects, colors, composition, any text, context.', 'read': 'Read all text in this image, preserving structure and formatting.', 'extract_text': 'Extract all text from this image.'}.get"
+    ]
+  },
+  {
+    "path": "actions/flight_finder.py",
+    "lines": 409,
+    "sha256": "370474e9c3c97b55a2bc7aae2ca2dac9a6fb6c499014f0b3b2ddd9336248550b",
+    "definitions": [
+      "_get_base_dir",
+      "_get_api_key",
+      "_parse_date",
+      "_build_google_flights_url",
+      "_search_flights_browser",
+      "_parse_flights_with_gemini",
+      "_format_spoken",
+      "_format_text_report",
+      "_save_to_desktop",
+      "flight_finder"
+    ],
+    "boundary_calls": [
+      "json.loads",
+      "player.write_log",
+      "safe_files.write",
+      "subprocess.Popen"
+    ]
+  },
+  {
+    "path": "actions/game_updater.py",
+    "lines": 1103,
+    "sha256": "c34462cb00b938877abb62df2283236ba824b97f9c3541c303fa5ca266485d5a",
+    "definitions": [
+      "_find_steam_path",
+      "_find_steam_windows",
+      "_find_steam_mac",
+      "_find_steam_linux",
+      "_steam_exe",
+      "_launch_steam_url",
+      "_get_steam_libraries",
+      "_get_steam_games",
+      "_is_steam_running",
+      "_get_steam_window_rect",
+      "_click_first_profile_by_screenshot",
+      "_handle_steam_profile_selection",
+      "_find_best_drive",
+      "_select_drive_in_dialog",
+      "_click_button",
+      "_handle_install_dialog_pyautogui",
+      "_handle_install_dialog",
+      "_ensure_steam_running",
+      "_search_steam_appid",
+      "_update_steam_games",
+      "_install_steam_game",
+      "_get_download_status",
+      "_system_shutdown",
+      "_watch_and_shutdown",
+      "_find_epic_exe",
+      "_find_epic_exe_windows",
+      "_find_epic_exe_mac",
+      "_find_epic_exe_linux",
+      "_epic_manifests_path",
+      "_get_epic_games",
+      "_is_epic_running",
+      "_update_epic_games",
+      "_schedule_daily_update",
+      "_schedule_windows",
+      "_schedule_mac",
+      "_schedule_linux",
+      "_cancel_scheduled_update",
+      "_get_schedule_status",
+      "game_updater"
+    ],
+    "boundary_calls": [
+      "Application(backend='uia').connect",
+      "_get_download_status",
+      "acf.read_text",
+      "already_running.append",
+      "already_updated.append",
+      "item_file.read_text",
+      "json.loads",
+      "json.loads(resp.read().decode()).get",
+      "player.write_log",
+      "plist_path.unlink",
+      "plist_path.write_text",
+      "pyautogui.typewrite",
+      "resp.read",
+      "resp.read().decode",
+      "subprocess.Popen",
+      "subprocess.run",
+      "subprocess.run(['pgrep', '-x', proc], capture_output=True, text=True).stdout.strip",
+      "threading.Thread",
+      "threading.Thread(target=_handle_install_dialog, args=(game_name or str(app_id),), daemon=True).start",
+      "threading.Thread(target=_watch_and_shutdown, kwargs={'steam_path': steam_path, 'speak': speak}, daemon=True).start",
+      "urllib.request.Request",
+      "urllib.request.urlopen",
+      "vdf_path.read_text"
+    ]
+  },
+  {
+    "path": "actions/open_app.py",
+    "lines": 301,
+    "sha256": "ad6bd172e7504cf492cdf551c805b22786833083aa74c912280c0066f508b823",
+    "definitions": [
+      "_normalize",
+      "_check_installed_binary",
+      "_launch_windows",
+      "_launch_macos",
+      "_launch_linux",
+      "open_app"
+    ],
+    "boundary_calls": [
+      "player.write_log",
+      "pyautogui.write",
+      "subprocess.Popen",
+      "subprocess.run"
+    ]
+  },
+  {
+    "path": "actions/proactive.py",
+    "lines": 127,
+    "sha256": "3c2faa796468aa54e5184fb46b064c63d934eb0ada15f9ddddb91f6642368622",
+    "definitions": [
+      "ProactiveEngine"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "actions/reminder.py",
+    "lines": 367,
+    "sha256": "58cff5956a461bdd55a050bccdae24bde85ed544b492fb86b2c8672a4bd0f79c",
+    "definitions": [
+      "_base_dir",
+      "_get_os",
+      "_scripts_dir",
+      "_sanitise",
+      "_write_notify_script",
+      "_schedule_windows",
+      "_schedule_mac",
+      "_schedule_linux",
+      "reminder",
+      "_parse_time"
+    ],
+    "boundary_calls": [
+      "_write_notify_script",
+      "data[task_name].update",
+      "player.write_log",
+      "plist_path.unlink",
+      "plist_path.write_text",
+      "script_path.unlink",
+      "subprocess.run",
+      "xml_path.unlink",
+      "xml_path.write_text"
+    ]
+  },
+  {
+    "path": "actions/screen_processor.py",
+    "lines": 177,
+    "sha256": "f554cc7efa6415f5578e1c42618631174459c901feb3b99b58db144dde094981",
+    "definitions": [
+      "_base_dir",
+      "_load_config",
+      "_save_config_key",
+      "_get_os",
+      "_compress",
+      "_capture_screen",
+      "_cv2_backend",
+      "_probe_camera",
+      "_detect_camera_index",
+      "_get_camera_index",
+      "_capture_camera"
+    ],
+    "boundary_calls": [
+      "_load_config",
+      "_load_config().get",
+      "_load_config().get('os_system', 'windows').lower",
+      "cap.read",
+      "load_api_keys"
+    ]
+  },
+  {
+    "path": "actions/send_message.py",
+    "lines": 66,
+    "sha256": "9900200db48e3d6665d9a52926d98c6e1a8f65d2017f6f748bcc2765542f7cad",
+    "definitions": [
+      "Recipient",
+      "SendState",
+      "MessagingAdapter",
+      "register_adapter",
+      "send_message",
+      "_desktop_send",
+      "_send_whatsapp"
+    ],
+    "boundary_calls": [
+      "_desktop_send",
+      "adapter.send",
+      "confirm.request",
+      "send_message"
+    ]
+  },
+  {
+    "path": "actions/system_monitor.py",
+    "lines": 200,
+    "sha256": "add566373ddbed4c13ba627ae3b5637b5cd35486d47d0f964dbc6c7ad3f5fbb7",
+    "definitions": [
+      "_nvml_gpu",
+      "_get_gpu_usage",
+      "_get_cpu_temp",
+      "get_system_status",
+      "SystemMonitor"
+    ],
+    "boundary_calls": [
+      "_load"
+    ]
+  },
+  {
+    "path": "actions/video_player.py",
+    "lines": 317,
+    "sha256": "9ec14ffa820c8c7ee2460bc6a4d389a7d0bf3579d1914681fe023e390631c23d",
+    "definitions": [
+      "_begin_open",
+      "_still_wanted",
+      "_is_url",
+      "_local_path",
+      "_resolve_youtube",
+      "_search_page",
+      "video_player",
+      "_play_youtube",
+      "_say"
+    ],
+    "boundary_calls": [
+      "player.request_say",
+      "threading.Lock",
+      "threading.Thread",
+      "threading.Thread(target=_play_youtube, args=(player, source, _begin_open()), daemon=True, name='video-open').start"
+    ]
+  },
+  {
+    "path": "actions/weather_report.py",
+    "lines": 72,
+    "sha256": "af03302279ef882e55f01d734316303137710a2e3d1108552703fa5ef613dbd8",
+    "definitions": [
+      "weather_action",
+      "_log"
+    ],
+    "boundary_calls": [
+      "player.write_log"
+    ]
+  },
+  {
+    "path": "actions/web_search.py",
+    "lines": 418,
+    "sha256": "3c76e68f97522335d38914834d70a5d1477ec320d3f2a37bac15baec14244e0f",
+    "definitions": [
+      "_gemini_available",
+      "_note_gemini_error",
+      "_QuotaCooldown",
+      "_log_gemini_failure",
+      "_run_bounded",
+      "_get_base_dir",
+      "_get_api_key",
+      "_gemini_search",
+      "_get_ddgs",
+      "_ddg_search",
+      "_ddg_news",
+      "_format_ddg",
+      "_format_news",
+      "_gemini_headlines",
+      "_search",
+      "_news",
+      "_research",
+      "_price",
+      "_compare",
+      "web_search"
+    ],
+    "boundary_calls": [
+      "player.write_log",
+      "threading.Lock",
+      "threading.Thread"
+    ]
+  },
+  {
+    "path": "actions/workspace_scope.py",
+    "lines": 12,
+    "sha256": "c100450ed2a55ee2d3ff578cf5115a52bc3f8423e140c0c72bdab6d4c144c06a",
+    "definitions": [
+      "workspace_scope"
+    ],
+    "boundary_calls": [
+      "confirm.request"
+    ]
+  },
+  {
+    "path": "actions/youtube_video.py",
+    "lines": 480,
+    "sha256": "aadec691db3b776d49ab3d8048e1c378f2cd1104d0bb3addb5874f9cc39ecf0c",
+    "definitions": [
+      "_get_base_dir",
+      "_get_api_key",
+      "_open_url",
+      "_scrape_first_video_url",
+      "_extract_video_id",
+      "_is_valid_youtube_url",
+      "_ask_for_url",
+      "_get_transcript",
+      "_summarize_with_gemini",
+      "_save_summary",
+      "_scrape_video_info",
+      "_scrape_trending",
+      "_handle_play",
+      "_handle_summarize",
+      "_handle_get_info",
+      "_handle_trending",
+      "youtube_video"
+    ],
+    "boundary_calls": [
+      "player.write_log",
+      "requests.get",
+      "safe_files.write",
+      "subprocess.Popen"
+    ]
+  },
+  {
+    "path": "config/__init__.py",
+    "lines": 23,
+    "sha256": "8236482790b08acfbe83167c928e87dd31c9d3a679fb6d9385aa74fb414bf7ef",
+    "definitions": [
+      "_platform_os",
+      "get_config",
+      "get_os",
+      "is_windows",
+      "is_mac",
+      "is_linux"
+    ],
+    "boundary_calls": [
+      "load_api_keys"
+    ]
+  },
+  {
+    "path": "core/__init__.py",
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/action_loader.py",
+    "lines": 227,
+    "sha256": "8ad2a98421bb3da742be0b13ebd1ce09fba04dae18878a1273dc57ce30a9cdc9",
+    "definitions": [
+      "_opt_upper",
+      "ActionRecord",
+      "ActionRegistry",
+      "_call_handler",
+      "_validate",
+      "discover_actions"
+    ],
+    "boundary_calls": [
+      "spec.loader.exec_module"
+    ]
+  },
+  {
+    "path": "core/archives.py",
+    "lines": 52,
+    "sha256": "c1ae40278fc9a054f46b3edbe31b490d98991609af63d1d39c358c9c893868c2",
+    "definitions": [
+      "extract_bounded"
+    ],
+    "boundary_calls": [
+      "out.write",
+      "stream.read"
+    ]
+  },
+  {
+    "path": "core/audio_devices.py",
+    "lines": 432,
+    "sha256": "ca93ba7135e05687ca27e160b7620dd870ca3fc610787f092b590973030cc890",
+    "definitions": [
+      "_transport_works",
+      "_display_name",
+      "configure",
+      "_usable",
+      "_is_pseudo",
+      "_query",
+      "prefetch",
+      "list_devices",
+      "resolve",
+      "stream_settings"
+    ],
+    "boundary_calls": [
+      "st.write",
+      "threading.Lock",
+      "threading.Thread",
+      "threading.Thread(target=_work, daemon=True, name='audio-devices').start"
+    ]
+  },
+  {
+    "path": "core/audio_handoff.py",
+    "lines": 42,
+    "sha256": "312998ab9a3da7f514023afa1f0344f5bc1717af4783c6db8da278cb1d69d395",
+    "definitions": [
+      "AudioHandoff"
+    ],
+    "boundary_calls": [
+      "self.loop.call_soon_threadsafe"
+    ]
+  },
+  {
+    "path": "core/avatar.py",
+    "lines": 715,
+    "sha256": "e582d3e88913baa69aba4d0f6ff921d23195bc4c5c16ef918f7082b385377fde",
+    "definitions": [
+      "_rate",
+      "_c",
+      "_blend",
+      "HoloAvatar"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/avatar_mesh.py",
+    "lines": 351,
+    "sha256": "305682e6166db50945c91ef9b75207c534c0b6418780d0d97af9035899163c27",
+    "definitions": [
+      "_load_obj",
+      "_boundary_loop",
+      "_slerp",
+      "_add_cranium",
+      "_add_neck",
+      "_vertex_normals",
+      "_unique_edges",
+      "_check_landmarks",
+      "build_head",
+      "get_head_mesh"
+    ],
+    "boundary_calls": [
+      "_load_obj",
+      "path.read_text",
+      "path.read_text(encoding='utf-8').splitlines"
+    ]
+  },
+  {
+    "path": "core/confirm.py",
+    "lines": 193,
+    "sha256": "1b81dda0526f7e96fdaf2345a25445310036fc49d46f9a9089ce105a6bdda09f",
+    "definitions": [
+      "_Pending",
+      "bind",
+      "_log",
+      "request",
+      "resolve",
+      "pending_title",
+      "_cancel_event",
+      "cancel_pending"
+    ],
+    "boundary_calls": [
+      "threading.Event",
+      "threading.Lock",
+      "threading.Thread",
+      "threading.Thread(target=_worker, daemon=True, name=f'confirm-{p.key}').start"
+    ]
+  },
+  {
+    "path": "core/credential_input.py",
+    "lines": 24,
+    "sha256": "74d262f336eb8481520c7d5c380234e0383f50b3f83aff793cb3cfbbe7a935c9",
+    "definitions": [
+      "InvalidCredential",
+      "validate_gemini_key",
+      "plausible"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/credentials.py",
+    "lines": 91,
+    "sha256": "8d578834c94fb72af5de965ea5a4fd783ffb4a24e4fd3bb165d5f312074d6670",
+    "definitions": [
+      "CredentialUnavailable",
+      "DPAPIStore",
+      "KeyringStore",
+      "backend",
+      "secret_field",
+      "protect",
+      "resolve",
+      "has_plaintext"
+    ],
+    "boundary_calls": [
+      "self._crypt(self._path(name).read_bytes(), True).decode",
+      "self._path(name).read_bytes"
+    ]
+  },
+  {
+    "path": "core/dashboard_security.py",
+    "lines": 34,
+    "sha256": "0962aea92f893d94c080ccebc5c719c08a38e03f3e59ba46dce9753bc627c00d",
+    "definitions": [
+      "RateLimit",
+      "RequestLimits"
+    ],
+    "boundary_calls": [
+      "send"
+    ]
+  },
+  {
+    "path": "core/documents.py",
+    "lines": 41,
+    "sha256": "e8bde547d0bf7f6aa72f33cabe02c69f3c48045c419af086a8ac845133a33994",
+    "definitions": [
+      "analyze_chunks",
+      "extract_pdf"
+    ],
+    "boundary_calls": [
+      "PdfReader"
+    ]
+  },
+  {
+    "path": "core/echo.py",
+    "lines": 288,
+    "sha256": "e63af72cef93a4f0d9e4d0c18a5f021ab2c3e036c391177cf6277817afd8ec5b",
+    "definitions": [
+      "band_energies",
+      "EchoGuard"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/execution.py",
+    "lines": 119,
+    "sha256": "6d2cae34ccd7fc971bbd194c8877b5da791efed4cd2b92a9254cfd6af1d589ed",
+    "definitions": [
+      "ExecutionResult",
+      "parse_command",
+      "_terminate",
+      "run_trusted",
+      "current_cancel",
+      "_image",
+      "_flags",
+      "run_generated",
+      "propose_dependencies"
+    ],
+    "boundary_calls": [
+      "ExecutionResult",
+      "pipe.read",
+      "request",
+      "subprocess.Popen",
+      "subprocess.run",
+      "threading.Event",
+      "threading.Thread",
+      "write"
+    ]
+  },
+  {
+    "path": "core/gemini.py",
+    "lines": 336,
+    "sha256": "aa03120de2c3c1a5f290d7dee73221ab5730717f8c0329ce8cc351f34a2bd967",
+    "definitions": [
+      "_cool",
+      "is_quota_error",
+      "is_unavailable_error",
+      "is_gone_error",
+      "live_model",
+      "note_live_failure",
+      "_cooling",
+      "api_key",
+      "client",
+      "_Reply",
+      "_live_model",
+      "_to_live_parts",
+      "_live_turn",
+      "_live_call",
+      "call",
+      "text",
+      "as_json"
+    ],
+    "boundary_calls": [
+      "cl.aio.live.connect",
+      "gtypes.LiveConnectConfig",
+      "json.loads",
+      "session.send_client_content",
+      "threading.BoundedSemaphore",
+      "threading.Lock"
+    ]
+  },
+  {
+    "path": "core/hotkey.py",
+    "lines": 173,
+    "sha256": "8ef1155dc08ca0ef1ddf096aa8f01ff9a1bdf8a9cda0a221dd17e94000aed70d",
+    "definitions": [
+      "chord_label",
+      "qt_sequence",
+      "PushToTalk"
+    ],
+    "boundary_calls": [
+      "self._thread.start",
+      "threading.Event",
+      "threading.Thread"
+    ]
+  },
+  {
+    "path": "core/installer.py",
+    "lines": 21,
+    "sha256": "a3f0625d1f5272da913979675ec15e9a0fdd57f5be63a4a337173a21d301ecee",
+    "definitions": [
+      "_available",
+      "_pip",
+      "install_for_config"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/live_config.py",
+    "lines": 108,
+    "sha256": "524ae97c7460ef0c6157e23a741ef1ec471fb9d4d3f6a27b67673f7e25d01a36",
+    "definitions": [
+      "Capabilities",
+      "capabilities",
+      "api_version",
+      "validate_schema",
+      "compatible_declarations",
+      "compatible_config",
+      "probe_stages"
+    ],
+    "boundary_calls": [
+      "types.LiveConnectConfig"
+    ]
+  },
+  {
+    "path": "core/llm_client.py",
+    "lines": 584,
+    "sha256": "72320a831d4529859d6e42475ff1a46293fa4c25ba758987cc79b09d868a4934",
+    "definitions": [
+      "get_base_dir",
+      "get_llm_provider",
+      "_load_config",
+      "ensure_ollama_running",
+      "warmup_model",
+      "check_model_available",
+      "get_llm_settings",
+      "call_llm",
+      "call_llm_text",
+      "_stream_openai",
+      "call_llm_stream"
+    ],
+    "boundary_calls": [
+      "_load_config",
+      "_load_config().get",
+      "_load_config().get('llm_provider', 'ollama').strip",
+      "_load_config().get('llm_provider', 'ollama').strip().lower",
+      "json.loads",
+      "load_api_keys",
+      "requests.get",
+      "requests.post",
+      "subprocess.Popen"
+    ]
+  },
+  {
+    "path": "core/local_commands.py",
+    "lines": 14,
+    "sha256": "242bb4d55e6b624b862a1f4b3211ab3df6a9fc2677e1e0cf230bcb559045d1ed",
+    "definitions": [
+      "route"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/local_voice.py",
+    "lines": 34,
+    "sha256": "0166eb3449104f52bc5a6a5b1a408c9c6c98d468bb9105a13ac4c75443ce689d",
+    "definitions": [
+      "synthesize"
+    ],
+    "boundary_calls": [
+      "path.unlink",
+      "wav.readframes"
+    ]
+  },
+  {
+    "path": "core/native.py",
+    "lines": 22,
+    "sha256": "a30d72bacae71e588ccc73b86bd666981fd347c6b3444e8e18b7fdee9606599d",
+    "definitions": [
+      "desktop_input",
+      "cancellable_type"
+    ],
+    "boundary_calls": [
+      "keyboard.typewrite"
+    ]
+  },
+  {
+    "path": "core/path_policy.py",
+    "lines": 93,
+    "sha256": "2109d65ec80b39c04bcc158a1096d90bb240da84eb487dbf8bf5bd680da9f259",
+    "definitions": [
+      "validate_spelling",
+      "_no_links",
+      "_protected",
+      "grant",
+      "validate",
+      "project_path",
+      "validate_tree",
+      "default_workspace"
+    ],
+    "boundary_calls": [
+      "threading.RLock"
+    ]
+  },
+  {
+    "path": "core/plugin_loader.py",
+    "lines": 291,
+    "sha256": "bf85045263efe5ed7da39ffa7a34ba5a9084de258e7a541d5cb51412c95d0bf8",
+    "definitions": [
+      "_opt_upper",
+      "PluginRecord",
+      "PluginRegistry",
+      "_call_run",
+      "_validate",
+      "_load_error",
+      "discover_plugins"
+    ],
+    "boundary_calls": [
+      "_load_error",
+      "spec.loader.exec_module"
+    ]
+  },
+  {
+    "path": "core/plugin_trust.py",
+    "lines": 37,
+    "sha256": "5304c58453ac6f9fb48eb8bfdcbedf1998e3ebec575b76e0d327ec03fefc050e",
+    "definitions": [
+      "bundle_digest",
+      "trusted",
+      "approve",
+      "request_review"
+    ],
+    "boundary_calls": [
+      "confirm.request",
+      "p.read_bytes",
+      "storage.read",
+      "storage.read(TRUST_FILE, {}).get"
+    ]
+  },
+  {
+    "path": "core/prompt.txt",
+    "lines": 169,
+    "sha256": "dfe40c8a679dd4511f95ceeac5a6b650da2b2d2390e1f30f45af67c961fedda6"
+  },
+  {
+    "path": "core/provider_errors.py",
+    "lines": 88,
+    "sha256": "e14f30f208f721b7d6d7c9461bb177c7125dbef1e8f98212346612960a597eb4",
+    "definitions": [
+      "LiveSetupRejected",
+      "MissingCredential",
+      "Failure",
+      "classify",
+      "retry_delay",
+      "connect_with_timeout"
+    ],
+    "boundary_calls": [
+      "client.aio.live.connect"
+    ]
+  },
+  {
+    "path": "core/redaction.py",
+    "lines": 38,
+    "sha256": "a24b5737f62ddcf15e479c390df5e66625d28276258ee674e18ba2af8a1d3c46",
+    "definitions": [
+      "register",
+      "redact",
+      "RedactedStream",
+      "install"
+    ],
+    "boundary_calls": [
+      "self.stream.write",
+      "threading.Lock"
+    ]
+  },
+  {
+    "path": "core/runtime_state.py",
+    "lines": 59,
+    "sha256": "dd72b7f92296c245db4f32e7ef9b877e62f7f71e85ea7c79ca182383783184ff",
+    "definitions": [
+      "State",
+      "RuntimeState"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/safe_files.py",
+    "lines": 139,
+    "sha256": "5a84d6c09934fa6a067dbadc77d80cbc5f5f19d0587aa339df511cf77ca02bec",
+    "definitions": [
+      "UndoConflict",
+      "fingerprint",
+      "atomic_bytes",
+      "atomic_copy_file",
+      "_unchanged",
+      "snapshot",
+      "_record",
+      "restore",
+      "write",
+      "copy",
+      "move"
+    ],
+    "boundary_calls": [
+      "(folder / 'manifest.json').read_text",
+      "f.read",
+      "f.write",
+      "json.loads",
+      "os.unlink",
+      "p.read_bytes",
+      "p.unlink",
+      "shutil.rmtree",
+      "threading.RLock"
+    ]
+  },
+  {
+    "path": "core/storage.py",
+    "lines": 73,
+    "sha256": "7fa1ad1911178503ae467e2ad3ab52f0527bc0f0199d447b621f40d2ce42c053",
+    "definitions": [
+      "StateCorrupt",
+      "transaction",
+      "_decode",
+      "_read",
+      "read",
+      "_write",
+      "write",
+      "update"
+    ],
+    "boundary_calls": [
+      "_read",
+      "_write",
+      "backup.read_bytes",
+      "f.write",
+      "json.loads",
+      "p.read_bytes",
+      "threading.Lock",
+      "threading.RLock",
+      "threading.local"
+    ]
+  },
+  {
+    "path": "core/stt.py",
+    "lines": 93,
+    "sha256": "17976dec1585d7f808a1e02bbb217a88093bf6085f61b39a9bb57d2131259b8e",
+    "definitions": [
+      "WhisperSTT",
+      "VoskSTT"
+    ],
+    "boundary_calls": [
+      "json.loads"
+    ]
+  },
+  {
+    "path": "core/tasks.py",
+    "lines": 128,
+    "sha256": "1bec8ce02466072e3a2c5f7c623802c2bd9448c9a73b58dc04d4f16df9cf969b",
+    "definitions": [
+      "TaskCancelled",
+      "cancellation_event",
+      "checkpoint",
+      "progress",
+      "cancellable_sleep",
+      "in_executor",
+      "offer_audio",
+      "TaskResult",
+      "TaskRecord",
+      "TaskManager"
+    ],
+    "boundary_calls": [
+      "TaskCancelled",
+      "TaskRecord",
+      "TaskResult",
+      "asyncio.create_task",
+      "loop.run_in_executor",
+      "self.execute",
+      "self.queue.task_done"
+    ]
+  },
+  {
+    "path": "core/tts.py",
+    "lines": 442,
+    "sha256": "1de291decabe1963c56ff9e2d3ab31d1e87bedb11ab0c11fabf0770e9bb2d6c8",
+    "definitions": [
+      "_to_numpy",
+      "_compress_silence",
+      "_play_np",
+      "_play_audio_bytes",
+      "EdgeTTSEngine",
+      "_import_kokoro_pipeline",
+      "KokoroTTSEngine",
+      "ElevenLabsTTSEngine",
+      "TTSPlayer",
+      "create_tts_player"
+    ],
+    "boundary_calls": [
+      "requests.post",
+      "subprocess.run",
+      "synth_thread.join",
+      "synth_thread.start",
+      "threading.Lock",
+      "threading.Thread",
+      "torch.set_num_interop_threads",
+      "torch.set_num_threads"
+    ]
+  },
+  {
+    "path": "core/undo.py",
+    "lines": 123,
+    "sha256": "55b32337855482e30f45c503c83d37b686d66c897cf23326412675d6b84151e2",
+    "definitions": [
+      "_Entry",
+      "push_undo",
+      "can_undo",
+      "peek",
+      "history",
+      "undo_last",
+      "clear"
+    ],
+    "boundary_calls": [
+      "threading.Lock"
+    ]
+  },
+  {
+    "path": "core/validation.py",
+    "lines": 27,
+    "sha256": "d9e98a1ec3b1b4d2152629b1c8ef9935793a296998cd7ae2771489e55896c9a0",
+    "definitions": [
+      "validate_arguments"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/viseme.py",
+    "lines": 275,
+    "sha256": "1bd7a9739b4eee6ce780a488f5a7cfeddbd866bfbdaa6f02e436e488e60fa8fa",
+    "definitions": [
+      "to_latin",
+      "coverage",
+      "text_to_visemes",
+      "VisemeStream"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "core/wake_word.py",
+    "lines": 259,
+    "sha256": "2e8eade3df81bd2f108e7d3995a05e72038364bd6629794c29fa33175700467e",
+    "definitions": [
+      "is_installed",
+      "is_ready",
+      "model_directory",
+      "install_and_download",
+      "WakeWordDetector"
+    ],
+    "boundary_calls": [
+      "is_ready",
+      "output.write",
+      "requests.get",
+      "resource['download_url'].replace",
+      "self._thread.is_alive",
+      "self._thread.start",
+      "thread.is_alive",
+      "thread.join",
+      "threading.Lock",
+      "threading.RLock",
+      "threading.Thread",
+      "threading.current_thread"
+    ]
+  },
+  {
+    "path": "dashboard/__init__.py",
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "dashboard/server.py",
+    "lines": 808,
+    "sha256": "8ad553f27e1d58f54bd81a964bf7e0b8795b18e77167dd83ff1a5dee4f4022ab",
+    "definitions": [
+      "_make_uploads_dir",
+      "_get_gemini_key",
+      "_derive_key",
+      "_decrypt_cbc",
+      "_ensure_network_access",
+      "_ensure_crypto_js",
+      "_local_ip",
+      "_ensure_certs",
+      "_read",
+      "DashboardServer"
+    ],
+    "boundary_calls": [
+      "(STATIC_DIR / name).read_text",
+      "_make_uploads_dir",
+      "_read",
+      "asyncio.create_task",
+      "context.load_cert_chain",
+      "crt_p.write_bytes",
+      "dest.unlink",
+      "file.read",
+      "fout.write",
+      "json.loads",
+      "key_p.write_bytes",
+      "s.connect",
+      "self._connect_callback",
+      "self._uploads_dir.iterdir",
+      "self._uploads_dir.mkdir",
+      "task.cancel",
+      "websocket.send_json",
+      "ws.send_json"
+    ]
+  },
+  {
+    "path": "dashboard/static/app.html",
+    "lines": 587,
+    "sha256": "53de1970f034074e168d592453cf3d278e6f458566d51595e908ef487ab7243e"
+  },
+  {
+    "path": "dashboard/static/crypto-js.min.js",
+    "lines": 1,
+    "sha256": "769a555de553babc35a3338f344dd7aa16260c93cea2c7db290707c90484e7cc"
+  },
+  {
+    "path": "dashboard/static/login.html",
+    "lines": 222,
+    "sha256": "0349505677109fc70edf8bbac56a22fa7e638b6544a68f3f2c026eb3db1c5cd2"
+  },
+  {
+    "path": "docs/EXECUTION_SECURITY.md",
+    "lines": 13,
+    "sha256": "ad09d264e240ba4db41e5813d547066021c67db32d821bd8994063f6a9bdfff3"
+  },
+  {
+    "path": "docs/PHASE1_ROOT_CAUSE_REPORT.md",
+    "lines": 122,
+    "sha256": "a216e2b3544fe657ac8616350b19c99f9dce420ec024bf2d6454e9517c471b09"
+  },
+  {
+    "path": "docs/SDK_VERIFICATION.md",
+    "lines": 12,
+    "sha256": "7aa5e6047370d7473dbafe056adc8c6a21fefd2ecabf28f7d605502f08080c96"
+  },
+  {
+    "path": "docs/VOICE_INTERRUPTION.md",
+    "lines": 9,
+    "sha256": "8aff287db018d5660e5ef0c2ef98398aa894596be0cff0740f3895c28264781a"
+  },
+  {
+    "path": "docs/VOICE_RUNTIME_REPAIR.md",
+    "lines": 87,
+    "sha256": "592c2a32a46433db869126f50b7c8303670ea0b90034a148da67a9a08f6872dc"
+  },
+  {
+    "path": "main.py",
+    "lines": 2700,
+    "sha256": "43f0ee4feda1db20b80a5762ff6fc254cbed147b14fa859907ab8abbf4e419ec",
+    "definitions": [
+      "get_base_dir",
+      "_pcm_level",
+      "_pcm_visemes",
+      "_describe_tools",
+      "_describe_limits",
+      "_render_prompt",
+      "_get_api_key",
+      "_load_system_prompt",
+      "_is_repeat_chunk",
+      "_clean_transcript",
+      "_ReconnectSignal",
+      "_is_reconnect_signal",
+      "_keep_context_of",
+      "JarvisLive",
+      "main"
+    ],
+    "boundary_calls": [
+      "PROMPT_PATH.read_text",
+      "TaskManager",
+      "_ReconnectSignal",
+      "_is_reconnect_signal",
+      "_load_system_prompt",
+      "asyncio.TaskGroup",
+      "asyncio.create_task",
+      "asyncio.run_coroutine_threadsafe",
+      "asyncio.to_thread",
+      "connect_with_timeout",
+      "in_executor",
+      "load_api_keys",
+      "load_api_keys().get",
+      "load_memory",
+      "loop.call_soon_threadsafe",
+      "self._dashboard.set_connect_callback",
+      "self._execute_tool",
+      "self._loop.call_soon_threadsafe",
+      "self._reconnect_event.clear",
+      "self._reconnect_event.is_set",
+      "self._reconnect_event.set",
+      "self._reconnect_event.wait",
+      "self._send_realtime",
+      "self._tasks.cancel_all",
+      "self._tasks.cancel_calls",
+      "self._tasks.close",
+      "self._tasks.new_session",
+      "self._tasks.submit",
+      "self._watch_reconnect",
+      "self.audio_in_queue.task_done",
+      "self.request_reconnect",
+      "self.session.send_client_content",
+      "self.session.send_realtime_input",
+      "self.ui.notify_phone_connected",
+      "self.ui.set_task_status",
+      "self.ui.write_log",
+      "session.send_tool_response",
+      "task.add_done_callback",
+      "task.cancel",
+      "tg.create_task",
+      "threading.Event",
+      "threading.Lock",
+      "threading.Thread",
+      "threading.Thread(target=initialize, daemon=True, name='wake-initialize').start",
+      "threading.Thread(target=report, daemon=True).start",
+      "threading.Thread(target=self._wake_detector.stop, daemon=True, name='wake-stop').start",
+      "threading.Thread(target=test, daemon=True).start",
+      "ui.write_log",
+      "wake_is_ready"
+    ]
+  },
+  {
+    "path": "memory/__init__.py",
+    "lines": 1,
+    "sha256": "1a53be42e3bb5daa658eac29b1df3568bbdd3f294d4a495f9f09c0e9d0e361c8",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "memory/config_manager.py",
+    "lines": 351,
+    "sha256": "b84a5b792fc215ed66c18dd827fe5f7235c8ee105888f795452bc0bd2a8d6b04",
+    "definitions": [
+      "get_base_dir",
+      "ensure_config_dir",
+      "config_exists",
+      "save_api_keys",
+      "load_api_keys",
+      "_has_refs",
+      "_migrate_credentials",
+      "_secure_update",
+      "save_config",
+      "get_gemini_key",
+      "is_configured",
+      "get_assistant_name",
+      "get_user_name",
+      "save_assistant_config",
+      "get_voice",
+      "save_voice",
+      "get_wake_word_enabled",
+      "save_wake_word_enabled",
+      "get_push_to_talk_enabled",
+      "save_push_to_talk_enabled",
+      "get_hud_style",
+      "save_hud_style",
+      "get_thinking_enabled",
+      "save_thinking_enabled",
+      "get_turn_tuning",
+      "save_turn_tuning",
+      "get_proactive_audio_enabled",
+      "save_proactive_audio_enabled",
+      "get_media_resolution",
+      "save_media_resolution",
+      "_save_flag",
+      "get_brief_enabled",
+      "save_brief_enabled",
+      "_patch_config",
+      "get_input_device",
+      "save_input_device",
+      "get_output_device",
+      "save_output_device",
+      "get_plugin_enabled",
+      "get_plugin_config",
+      "get_plugin_setting",
+      "save_plugin_config",
+      "save_plugin_enabled",
+      "get_response_language",
+      "save_response_language",
+      "get_lightweight_mode",
+      "save_lightweight_mode"
+    ],
+    "boundary_calls": [
+      "(load_api_keys().get('input_device', '') or '').strip",
+      "(load_api_keys().get('output_device', '') or '').strip",
+      "backup.read_text",
+      "load_api_keys",
+      "load_api_keys().get",
+      "load_api_keys().get('plugins_enabled', {}).get",
+      "storage.read",
+      "storage.write",
+      "str(load_api_keys().get('hud_style', 'face')).strip",
+      "str(load_api_keys().get('hud_style', 'face')).strip().lower",
+      "str(load_api_keys().get('media_resolution', 'medium')).strip",
+      "str(load_api_keys().get('media_resolution', 'medium')).strip().lower"
+    ]
+  },
+  {
+    "path": "memory/memory_manager.py",
+    "lines": 424,
+    "sha256": "d10790258f59a529c21652190076ae80560db750f142f2e3a6d200700830c80e",
+    "definitions": [
+      "get_base_dir",
+      "_empty_memory",
+      "load_memory",
+      "_all_entries",
+      "set_trim_notifier",
+      "_trim_to_limit",
+      "save_memory",
+      "_truncate_value",
+      "_recursive_update",
+      "update_memory",
+      "_entry_value",
+      "_pretty",
+      "format_memory_for_prompt",
+      "_score",
+      "search_memory",
+      "all_entries_for_ui",
+      "remember",
+      "forget",
+      "save_session_summary",
+      "pop_last_session"
+    ],
+    "boundary_calls": [
+      "load_memory",
+      "storage.read",
+      "storage.write"
+    ]
+  },
+  {
+    "path": "plugins/__init__.py",
+    "lines": 0,
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "plugins/_template.py",
+    "lines": 45,
+    "sha256": "56ec93455482fa9e08b380b6af9b06cdcc3f2c6a4c947b9f1bb617b77787ad72",
+    "definitions": [
+      "run"
+    ],
+    "boundary_calls": [
+      "player.write_log"
+    ]
+  },
+  {
+    "path": "readme.md",
+    "lines": 56,
+    "sha256": "ebccfb0683f66ae4bc4b184f09eca505f31dc20239b7263c3601fc5672266c94"
+  },
+  {
+    "path": "requirements/browser.txt",
+    "lines": 3,
+    "sha256": "05a6165e9c49bba9b992f65cd4314a75e1bc27e495d37d1b5a4e5f91f0547b10"
+  },
+  {
+    "path": "requirements/dashboard.txt",
+    "lines": 5,
+    "sha256": "a1eccfd525774f7bebd8e0fa61a754eb23f83ecb5574c14782739d8fa0c3a4ee"
+  },
+  {
+    "path": "requirements/documents.txt",
+    "lines": 6,
+    "sha256": "b0211cd980ed8d242bf233d8e3b4e9bf3ecce5f20f8b13fde31a92a40a77482c"
+  },
+  {
+    "path": "requirements/lock-linux-py312.txt",
+    "lines": 66,
+    "sha256": "adacdfd0b53a7c8cbd2cc2cb8201c3cc754f02386f6b9d38d0cc3280e0c75c43"
+  },
+  {
+    "path": "requirements/media.txt",
+    "lines": 5,
+    "sha256": "1c908a48f3106da635fd7b0d5c36d25350e1b3d7735a542676c47af4e10567db"
+  },
+  {
+    "path": "requirements/test.txt",
+    "lines": 4,
+    "sha256": "9c61a1ae1f1e3fe2154c4566615b2019c3620c49e866b1427a8d489aaaa81ab9"
+  },
+  {
+    "path": "requirements/wake.txt",
+    "lines": 2,
+    "sha256": "f5fbe5b7738a74d59e233ee6dcedec98fbe0a237f5ff8672fee1df21e870d070"
+  },
+  {
+    "path": "requirements/windows.txt",
+    "lines": 6,
+    "sha256": "318cb538c389f3bc653ab700cbdce19823158d2c9ef92d635d0adeddf0c18cea"
+  },
+  {
+    "path": "requirements-core.txt",
+    "lines": 14,
+    "sha256": "ca81cdc79873a95344edfb794ed50330e1c95d97d6dbfb5a671cc4bbd9b74c25"
+  },
+  {
+    "path": "requirements.txt",
+    "lines": 7,
+    "sha256": "728ac8b99f395a5251efe038c6525ca300a92c7b347b5f08deeff9ae6fb908fa"
+  },
+  {
+    "path": "setup.py",
+    "lines": 34,
+    "sha256": "d5a0051ed906b5379634937a60c83ea53c9ed765a1470b5306159f01fd4ea80b",
+    "definitions": [
+      "main"
+    ],
+    "boundary_calls": [
+      "subprocess.list2cmdline",
+      "subprocess.run"
+    ]
+  },
+  {
+    "path": "tests/test_baseline.py",
+    "lines": 23,
+    "sha256": "2756f98683b074903d708c141dcc97fc0fb4395bf13c488857413c64e747e011",
+    "definitions": [
+      "BaselineRisks"
+    ],
+    "boundary_calls": [
+      "(root / 'a').write_text",
+      "(root / 'b').read_text",
+      "(root / 'b').write_text",
+      "f.write_file",
+      "p.read_text",
+      "p.write_text"
+    ]
+  },
+  {
+    "path": "tests/test_phase1.py",
+    "lines": 91,
+    "sha256": "624b995892b79cc0e550545b9c14f0a1fa161328f1eb3d5a9762b4b7854ddca0",
+    "definitions": [
+      "FileSafety",
+      "ExecutionTruth"
+    ],
+    "boundary_calls": [
+      "(self.root / 'output/a/b.txt').read_text",
+      "(self.root / 'typed').read_text",
+      "confirm.request",
+      "desktop._execute_generated_code",
+      "f.write_text",
+      "f.writestr",
+      "p.read_bytes",
+      "p.read_text",
+      "p.write_bytes",
+      "p.write_text",
+      "popen.assert_not_called",
+      "q.read_text",
+      "q.write_text",
+      "sf.write",
+      "threading.Event",
+      "threading.Timer",
+      "threading.Timer(0.1, event.set).start"
+    ]
+  },
+  {
+    "path": "tests/test_phase2.py",
+    "lines": 107,
+    "sha256": "141ea7affa205c9008224ad9b9ef5d87e498c2d3f2f6401268b8d5a381c6c1c5",
+    "definitions": [
+      "DashboardSecurity",
+      "MessagingSafety",
+      "BroadcastBounds"
+    ],
+    "boundary_calls": [
+      "adapter.send.assert_called_once",
+      "adapter.send.assert_not_called",
+      "asyncio.create_task",
+      "msg.SendState",
+      "msg.send_message",
+      "self.client.websocket_connect",
+      "ws.send_json"
+    ]
+  },
+  {
+    "path": "tests/test_phase3.py",
+    "lines": 75,
+    "sha256": "4f7a326de77aa0ae95b4a8b5770120a3ebe120e7e0dda379e70aefb36679f786",
+    "definitions": [
+      "TaskTests"
+    ],
+    "boundary_calls": [
+      "Path('main.py').read_text",
+      "TaskManager",
+      "asyncio.create_task",
+      "exec",
+      "in_executor",
+      "obj._tasks.close",
+      "threading.Event"
+    ]
+  },
+  {
+    "path": "tests/test_phase4.py",
+    "lines": 93,
+    "sha256": "ea10d534f0b12efce3aa3f3d0dbf2c8fbdc7a999e0869cf18190364a383ef87e",
+    "definitions": [
+      "increment",
+      "Vault",
+      "PersistenceTests"
+    ],
+    "boundary_calls": [
+      "cm.CONFIG_FILE.read_bytes",
+      "cm.CONFIG_FILE.write_text",
+      "cm.load_api_keys",
+      "concurrent.futures.ThreadPoolExecutor",
+      "json.loads",
+      "mm.load_memory",
+      "p.read_text",
+      "p.write_text",
+      "q.read_text",
+      "q.write_text",
+      "storage.read",
+      "storage.write"
+    ]
+  },
+  {
+    "path": "tests/test_phase5.py",
+    "lines": 252,
+    "sha256": "ea7f2d51415c6234aa6003f0fc87cc3fc68843fc8207bba7e63849f032ca336a",
+    "definitions": [
+      "Integrations",
+      "BrowserAndTasks"
+    ],
+    "boundary_calls": [
+      "(p / '.env.local').write_text",
+      "(p / 'main.py').write_text",
+      "(stage / 'main.py').read_text",
+      "TaskManager",
+      "confirm.request",
+      "executable.write_bytes",
+      "execution.ExecutionResult",
+      "execution.run_generated",
+      "generated[0].read_text",
+      "helper.write_text",
+      "p.read_bytes",
+      "p.read_text",
+      "p.write_bytes",
+      "p.write_text",
+      "plugin_loader.discover_plugins",
+      "sentinel.unlink",
+      "sf.write",
+      "spec.loader.exec_module",
+      "threading.Event"
+    ]
+  },
+  {
+    "path": "tests/test_round2.py",
+    "lines": 227,
+    "sha256": "0b8a7e6961a95a79c0f93da4f319e7da026741f0ba9bb97092a6dfe171f59ce4",
+    "definitions": [
+      "CredentialTests",
+      "ConfigurationTests",
+      "HandoffTests",
+      "ProbeTests",
+      "DashboardProtocolTests",
+      "WakeTests"
+    ],
+    "boundary_calls": [
+      "(Path(scratch) / 'test.txt').write_text",
+      "(str(seq) + '.' + payload).encode",
+      "app.request_shutdown",
+      "asyncio.create_task",
+      "hmac.new(key, (str(seq) + '.' + payload).encode(), hashlib.sha256).hexdigest",
+      "self.client.websocket_connect",
+      "stream.write",
+      "ws.send_bytes",
+      "ws.send_json"
+    ]
+  },
+  {
+    "path": "tests/test_voice_runtime.py",
+    "lines": 272,
+    "sha256": "a7e89378d32bf6ea06e321a5e804968d7b7e2fbb10d3403a35ea3ef098bd3173",
+    "definitions": [
+      "StateTests",
+      "ProviderTests",
+      "PipelineTests",
+      "RunLoopTests",
+      "LocalCommandTests",
+      "AudioWorkerTests",
+      "WakeSetupTests",
+      "SDKTransportTests",
+      "HandshakeTests"
+    ],
+    "boundary_calls": [
+      "app._execute_tool",
+      "app._send_realtime",
+      "app.request_shutdown",
+      "app.ui.write_log.assert_called",
+      "asyncio.create_task",
+      "connect_with_timeout",
+      "httpx.ConnectError",
+      "httpx.ReadTimeout",
+      "sentinel.read_text",
+      "sentinel.write_text",
+      "task.cancel",
+      "task.done",
+      "threading.Event",
+      "threading.Lock",
+      "threading.Thread",
+      "wake.install_and_download",
+      "wake.is_ready"
+    ]
+  },
+  {
+    "path": "tools/check_dashboard_js.py",
+    "lines": 20,
+    "sha256": "b58fb9644da0c26d0b29eb8d5fba503d668031b300f2f5effc649df773e342f3",
+    "definitions": [],
+    "boundary_calls": [
+      "(root / 'dashboard/static' / name).read_text",
+      "(root / 'dashboard/static/app.html').read_text",
+      "subprocess.run",
+      "target.write_text"
+    ]
+  },
+  {
+    "path": "tools/diagnostics.py",
+    "lines": 35,
+    "sha256": "60f9510edeb6d5553645143a64a32f60be89d7b1536d3f03ed62f0069cb9042f",
+    "definitions": [
+      "diagnose"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "tools/live_probe.py",
+    "lines": 115,
+    "sha256": "b8fff00673b5bbdd64079ea810cf973b52960e75d977e77e01c04fd261de7704",
+    "definitions": [
+      "runtime_config",
+      "probe",
+      "run",
+      "main"
+    ],
+    "boundary_calls": [
+      "Path(args.out).write_text",
+      "connect_with_timeout",
+      "types.LiveConnectConfig"
+    ]
+  },
+  {
+    "path": "tools/phase1_probe.py",
+    "lines": 433,
+    "sha256": "9053042961a5e2485326097e0af08b254a5e343bc1d6b00d66773652c57a0f6b",
+    "definitions": [
+      "record",
+      "_short",
+      "check_environment",
+      "_win_attributes",
+      "check_wake_word",
+      "_import_sd",
+      "check_audio",
+      "_mic_test",
+      "_speaker_test",
+      "check_hotkey",
+      "check_credentials",
+      "check_network",
+      "_classify",
+      "_live_probe",
+      "check_provider",
+      "main"
+    ],
+    "boundary_calls": [
+      "Path(args.out).write_text",
+      "cfg.read_text",
+      "client.aio.live.connect",
+      "json.loads",
+      "out.write",
+      "socket.create_connection",
+      "subprocess.run"
+    ]
+  },
+  {
+    "path": "tools/phase1_repro_error_order.py",
+    "lines": 43,
+    "sha256": "87217292532526bb2b34ca80a5d205f3966c4c1192cb539a7802ae5361de1fa8",
+    "definitions": [
+      "classify_like_main"
+    ],
+    "boundary_calls": []
+  },
+  {
+    "path": "tools/smoke_runtime.py",
+    "lines": 21,
+    "sha256": "18b7a1bb0d704b13490e325ec5134ebcd6ec8062b4255ac4565fe6f1711a52c7",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "tools/smoke_sdk.py",
+    "lines": 23,
+    "sha256": "5f236a34c8fb90dea6e48d4f673b1329e98d1be5effd34d60c7a40fa3bb5df42",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "tools/smoke_ui.py",
+    "lines": 51,
+    "sha256": "c366c32bc228b3f463f7a1b051f25e3281c4fa046c9268ba5d776b4f97eb60ac",
+    "definitions": [],
+    "boundary_calls": [
+      "app._win._task_status.text",
+      "app.set_task_status",
+      "review.isReadOnly"
+    ]
+  },
+  {
+    "path": "tools/trust_plugin.py",
+    "lines": 9,
+    "sha256": "5fa671f1fa7d8a6dbf14a391429213ab9fd58bb4db71a9e89c3d84edc9c00281",
+    "definitions": [],
+    "boundary_calls": []
+  },
+  {
+    "path": "tools/voice_diagnostics.py",
+    "lines": 115,
+    "sha256": "dde7bae96b40ba760a229e56eba6a3beff9200589c30b8527074c9f9f1d48510",
+    "definitions": [
+      "diagnose",
+      "main"
+    ],
+    "boundary_calls": [
+      "Path(args.out).write_text",
+      "is_ready",
+      "output.write"
+    ]
+  },
+  {
+    "path": "ui.py",
+    "lines": 5960,
+    "sha256": "f142318e6732474d9cbc3332bd69e9c73f4b7fea03b98d353da8c74a79ee3843",
+    "definitions": [
+      "_base_dir",
+      "_read_full_config",
+      "C",
+      "apply_ui_accent",
+      "current_palette",
+      "retheme_all_widgets",
+      "qcol",
+      "_nvml_gpu_windows",
+      "_SysMetrics",
+      "HudCanvas",
+      "MetricBar",
+      "LogWidget",
+      "_file_category",
+      "_fmt_size",
+      "FileDropZone",
+      "_DropCanvas",
+      "_CameraPreview",
+      "SetupOverlay",
+      "HueWheel",
+      "CustomizeOverlay",
+      "PluginManagerOverlay",
+      "_HudOverlay",
+      "ConfirmBanner",
+      "AudioDeviceOverlay",
+      "MemoryOverlay",
+      "ClipboardPanel",
+      "PluginSettingsOverlay",
+      "RemoteKeyOverlay",
+      "MainWindow",
+      "_RootShim",
+      "JarvisUI"
+    ],
+    "boundary_calls": [
+      "(app / 'Contents' / 'Info.plist').write_text",
+      "QApplication.clipboard().dataChanged.connect",
+      "_cam_x.clicked.connect",
+      "_read_full_config",
+      "_read_full_config().get",
+      "_vid_x.clicked.connect",
+      "ab.clicked.connect",
+      "audio_btn.clicked.connect",
+      "b.clicked.connect",
+      "btn.clicked.connect",
+      "button.clicked.connect",
+      "cancel.clicked.connect",
+      "cancel_btn.clicked.connect",
+      "cap.read",
+      "cfg.read_text",
+      "cfg.read_text(encoding='utf-8').splitlines",
+      "child.deleteLater",
+      "close.clicked.connect",
+      "close_btn.clicked.connect",
+      "ctypes.windll.ole32.CoTaskMemFree",
+      "current.deleteLater",
+      "cust_btn.clicked.connect",
+      "desk.unlink",
+      "desk.write_text",
+      "df_btn.clicked.connect",
+      "dismiss.clicked.connect",
+      "dtl.setReadOnly",
+      "f.write",
+      "fallback.clicked.connect",
+      "field.returnPressed.connect",
+      "followup.clicked.connect",
+      "fs_btn.clicked.connect",
+      "history_btn.clicked.connect",
+      "init_btn.clicked.connect",
+      "install_and_download",
+      "is_ready",
+      "language.currentTextChanged.connect",
+      "launcher.write_text",
+      "load_api_keys",
+      "mem_btn.clicked.connect",
+      "new_btn.clicked.connect",
+      "no.clicked.connect",
+      "ok.clicked.connect",
+      "os.unlink",
+      "ov.answered.connect",
+      "ov.closed.connect",
+      "ov.deleteLater",
+      "ov.done.connect",
+      "ov.picked.connect",
+      "ov.saved.connect",
+      "plist.read_text",
+      "plist.unlink",
+      "plist.write_text",
+      "plugin_btn.clicked.connect",
+      "proactive_btn.clicked.connect",
+      "px.loadFromData",
+      "quit_btn.clicked.connect",
+      "remote_btn.clicked.connect",
+      "request_review",
+      "rm.clicked.connect",
+      "save_btn.clicked.connect",
+      "sc_btn.clicked.connect",
+      "sc_full.activated.connect",
+      "sc_intr.activated.connect",
+      "sc_mute.activated.connect",
+      "self._anim_tmr.timeout.connect",
+      "self._app.aboutToQuit.connect",
+      "self._app.exec",
+      "self._autostart_btn.clicked.connect",
+      "self._brief_btn.clicked.connect",
+      "self._cam_frame_sig.connect",
+      "self._cam_stream_sig.connect",
+      "self._camera_sig.connect",
+      "self._clipboard_panel.action_requested.connect",
+      "self._clipboard_sig.connect",
+      "self._clock_tmr.timeout.connect",
+      "self._confirm_hide_sig.connect",
+      "self._confirm_sig.connect",
+      "self._content_display.setReadOnly",
+      "self._content_sig.connect",
+      "self._ctimer.timeout.connect",
+      "self._ctrl_btn.clicked.connect",
+      "self._dismiss_timer.timeout.connect",
+      "self._drawer_btn.clicked.connect",
+      "self._drop_zone.file_selected.connect",
+      "self._hex_input.textEdited.connect",
+      "self._hud_btn.clicked.connect",
+      "self._input.returnPressed.connect",
+      "self._interrupt_btn.clicked.connect",
+      "self._light_btn.toggled.connect",
+      "self._log_sig.connect",
+      "self._metric_tmr.timeout.connect",
+      "self._mute_btn.clicked.connect",
+      "self._ptt_btn.clicked.connect",
+      "self._quiz_hide_sig.connect",
+      "self._quiz_next_btn.clicked.connect",
+      "self._quiz_sig.connect",
+      "self._reconfig_sig.connect",
+      "self._remote_overlay.mark_connected",
+      "self._review_sig.connect",
+      "self._sig.connect",
+      "self._state_sig.connect",
+      "self._task_recent.append",
+      "self._task_recent.pop",
+      "self._task_sig.connect",
+      "self._task_status.setFont",
+      "self._task_status.setWordWrap",
+      "self._test_done.connect",
+      "self._timer.timeout.connect",
+      "self._tmr.timeout.connect",
+      "self._video_close_sig.connect",
+      "self._video_item.nativeSizeChanged.connect",
+      "self._video_mute_btn.clicked.connect",
+      "self._video_mute_sig.connect",
+      "self._video_open_sig.connect",
+      "self._video_player.errorOccurred.connect",
+      "self._video_sync.timeout.connect",
+      "self._voice_status_timer.timeout.connect",
+      "self._wake_btn.clicked.connect",
+      "self._wake_btns_sig.connect",
+      "self._wake_dl_sig.connect",
+      "self._wake_sleep_btn.clicked.connect",
+      "self._wheel.hue_committed.connect",
+      "self._wheel.hue_picked.connect",
+      "self._win._task_sig.emit",
+      "self._win.notify_phone_connected",
+      "self.action_requested.emit",
+      "self.setReadOnly",
+      "self.write_log",
+      "send.clicked.connect",
+      "send.setCursor",
+      "send.setFixedSize",
+      "send.setFixedWidth",
+      "send.setFont",
+      "send.setStyleSheet",
+      "settings_btn.clicked.connect",
+      "sub.deleteLater",
+      "subprocess.Popen",
+      "subprocess.run",
+      "sw.deleteLater",
+      "threading.Event",
+      "threading.Lock",
+      "threading.Thread",
+      "threading.Thread(target=_work, daemon=True).start",
+      "threading.Thread(target=self.on_text_command, args=(cmd,), daemon=True).start",
+      "threading.Thread(target=self.on_text_command, args=(msg,), daemon=True).start",
+      "threading.Thread(target=self.on_text_command, args=(txt,), daemon=True).start",
+      "threading.Thread(target=work, daemon=True, name='wake-state-warm').start",
+      "threading.Thread(target=worker, daemon=True).start",
+      "w.deleteLater",
+      "w.toggled.connect",
+      "winreg.DeleteValue",
+      "x_btn.clicked.connect",
+      "yes.clicked.connect"
+    ]
+  }
+]

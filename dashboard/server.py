@@ -3,7 +3,7 @@ from core.dashboard_security import RateLimit, RequestLimits
 dashboard/server.py — JARVIS opt-in local HTTPS dashboard
 
 TLS-only remote dashboard on port 8000, inactive until local UI activation.
-Security at the application layer: AES-256-CBC with session-key-derived key.
+TLS plus authenticated AES-CBC/HMAC-SHA256 command envelopes (v2), derived from a high-entropy bearer token. Legacy unauthenticated encrypted envelopes are rejected.
 CryptoJS is served from a bundled/cache copy, or explicitly redirected to the CDN; no automatic server download.
 
 Install deps:  pip install fastapi "uvicorn[standard]" cryptography
@@ -238,6 +238,8 @@ class DashboardServer:
         self._active = False
         self._token_expiry = {}
         self._ws_tokens = {}
+        self._tickets = {}
+        self._command_sequences = {}
         self._rate = RateLimit()
         self._server = None
         self._command_queue               = asyncio.Queue(maxsize=32)
@@ -281,14 +283,37 @@ class DashboardServer:
             self._aes_cache[session_key] = _derive_key(session_key)
         return self._aes_cache[session_key]
 
-    def _decrypt(self, token: str, enc_b64: str) -> str | None:
-        sk = self._token_keys.get(token)
-        if not sk:
-            return None
+    def _decrypt(self, token: str, envelope: str) -> str | None:
+        # Encrypt-then-MAC: authenticate the exact envelope before CBC parsing.
+        import hmac
         try:
-            return _decrypt_cbc(self._aes_key(sk), enc_b64)
-        except Exception:
-            return None
+            version, sequence, encoded, signature = envelope.split(':')
+            if version != 'v2' or not sequence.isascii() or not sequence.isdigit():return None
+            seq = int(sequence)
+            if not 0 < seq < 2**53 or seq <= self._command_sequences.get(token, 0):return None
+            mac_key = hashlib.sha256((token + 'JARVIS-DASHBOARD-MAC-v2').encode()).digest()
+            expected = hmac.new(mac_key, (sequence + '.' + encoded).encode(), hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(expected, signature):return None
+            raw = base64.b64decode(encoded, validate=True)
+            if len(raw)<32 or len(raw)%16:return None
+            text = _decrypt_cbc(self._aes_key(token), encoded)
+            self._command_sequences[token] = seq
+            return text
+        except (ValueError, TypeError, UnicodeError):return None
+
+    def _ticket(self, token, scope):
+        now = time.time()
+        self._tickets = {k:v for k,v in self._tickets.items() if v['expires']>now}
+        if len(self._tickets)>=64:raise ValueError('Socket ticket limit reached')
+        ticket = secrets.token_urlsafe(32)
+        self._tickets[ticket] = {'token':token, 'scope':scope, 'expires':now+30}
+        return ticket
+
+    def _consume_ticket(self, ticket, scope):
+        record = self._tickets.pop(ticket, None)
+        if record and record['expires']>time.time() and record['scope']==scope and self._authorized(record['token']):
+            return record['token']
+        return ''
 
     # ── callbacks ────────────────────────────────────────────────────────
 
@@ -484,6 +509,15 @@ class DashboardServer:
             await self.revoke_all()
             return JSONResponse({"ok": True, "revoked": count})
 
+        @app.post('/api/socket-ticket')
+        async def socket_ticket(req: Request):
+            token=req.headers.get('authorization','').removeprefix('Bearer ').strip()
+            if not self._authorized(token):return JSONResponse({'error':'Unauthorized'},status_code=401)
+            body=await req.json()
+            if not isinstance(body,dict) or body.get('scope') not in {'events','audio'}:
+                return JSONResponse({'error':'Invalid scope'},status_code=400)
+            return JSONResponse({'ticket':self._ticket(token,body['scope'])})
+
         @app.post("/api/command")
         async def command(req: Request):
             if not _auth(req):
@@ -520,8 +554,8 @@ class DashboardServer:
         # ── Phone mic real-time audio → Gemini Live ──────────────────────────
 
         @app.websocket("/ws/phone-audio")
-        async def phone_audio_ws(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def phone_audio_ws(websocket: WebSocket, ticket: str = ""):
+            tok = self._consume_ticket(ticket,"audio")
             if not self._authorized(tok):
                 await websocket.close(code=4001)
                 return
@@ -529,6 +563,7 @@ class DashboardServer:
                 await websocket.close(code=4008);return
             await websocket.accept()
             self._ws_tokens[websocket]=tok
+            if self._wake_callback:self._wake_callback()
             asyncio.create_task(self.broadcast(
                 {"type": "sys", "text": "Phone microphone live."}
             ))
@@ -538,11 +573,13 @@ class DashboardServer:
                     try: data = await asyncio.wait_for(websocket.receive_bytes(),timeout=1)
                     except asyncio.TimeoutError:continue
                     if not self._authorized(tok):break
+                    if not data or len(data)%2:
+                        await websocket.close(code=1003);break
                     if len(data)>32768:
                         await websocket.close(code=1009);break
                     try:
                         self._phone_audio_queue.put_nowait(
-                            {"data": data, "mime_type": "audio/pcm"}
+                            {"data": data, "mime_type": "audio/pcm;rate=16000"}
                         )
                     except asyncio.QueueFull:
                         pass  # drop frame rather than block
@@ -639,9 +676,8 @@ class DashboardServer:
             return JSONResponse({"files": files})
 
         @app.get("/uploads/{filename}")
-        async def download_file(filename: str, token: str = ""):
-            # Auth via query param — browser <a download> can't send custom headers
-            tok = token.strip()
+        async def download_file(filename: str, req: Request):
+            tok = req.headers.get("authorization", "").removeprefix("Bearer ").strip()
             if not self._authorized(tok):
                 return JSONResponse({"error": "Unauthorized"}, status_code=401)
             safe = re.sub(r'[/\\]', '', filename)
@@ -653,8 +689,8 @@ class DashboardServer:
             return FileResponse(str(path), filename=safe)
 
         @app.websocket("/ws")
-        async def ws_ep(websocket: WebSocket, token: str = ""):
-            tok = token.strip()
+        async def ws_ep(websocket: WebSocket, ticket: str = ""):
+            tok = self._consume_ticket(ticket,"events")
             if not self._authorized(tok):
                 await websocket.close(code=4001)
                 return
@@ -710,6 +746,8 @@ class DashboardServer:
         for old in list(self._tokens):
             if self._token_expiry.get(old,0)<=now:
                 self._tokens.discard(old);self._token_keys.pop(old,None);self._token_expiry.pop(old,None)
+                self._command_sequences.pop(old,None)
+                self._tickets={k:v for k,v in self._tickets.items() if v['token']!=old}
         if len(self._tokens)>=64:raise ValueError('Session limit reached')
         self._tokens.add(token);self._token_expiry[token]=now+3600
 
@@ -718,6 +756,8 @@ class DashboardServer:
 
     async def invalidate(self,token):
         key=self._token_keys.pop(token,None)
+        self._command_sequences.pop(token,None)
+        self._tickets={k:v for k,v in self._tickets.items() if v["token"]!=token}
         self._tokens.discard(token);self._token_expiry.pop(token,None)
         for ws,tok in list(self._ws_tokens.items()):
             if tok==token:

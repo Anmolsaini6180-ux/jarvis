@@ -299,7 +299,8 @@ def _get_api_key():
     from memory.config_manager import get_gemini_key
     key=get_gemini_key()
     if not key:raise __import__('core.provider_errors',fromlist=['MissingCredential']).MissingCredential()
-    return key
+    from core.credential_input import validate_gemini_key
+    return validate_gemini_key(key)
 
 
 def _load_system_prompt() -> str:
@@ -712,19 +713,20 @@ class JarvisLive:
             'provider':'connected' if self.session else 'unavailable',
             'mic':('frames received' if self.runtime.mic else 'unverified/unavailable'),
             'output':'stream open (audibility unverified)' if self._output_ready else 'unavailable',
-            'wake':('Hey Jarvis: running' if self._wake_detector and self._wake_detector.ready else 'unavailable/disabled'),
+            'wake':'Hey Jarvis: '+self._wake_state()['status'],
             'stt':'Gemini Live' if self.session else 'unavailable',
+            'capture_overflows':getattr(getattr(self,'_mic_handoff',None),'overflows',0),
+            'capture_dropped':getattr(getattr(self,'_mic_handoff',None),'dropped',0),
+            'phone':'connected' if self._dashboard and self._dashboard._clients else 'disconnected',
             'tts':'Gemini Live; local SAPI test selectable' if self.session else 'local Windows SAPI test selectable',
-            'input_device':get_input_device() or 'System default',
-            'output_device':get_output_device() or 'System default',
+            'input_device':getattr(self,'_actual_input_name',None) or (get_input_device() or 'System default')+' (not opened)',
+            'output_device':getattr(self,'_actual_output_name',None) or (get_output_device() or 'System default')+' (not opened)',
             'ptt_scope':self._ptt.scope if self._ptt else 'off',
         }
 
     def start_listening(self):
         self._capture_enabled.set()
         self._manual_listening = True
-        self._capture_enabled.set()
-        self._manual_listening=True
         self._awake = True
         self._last_user_speech = time.monotonic()
         self.runtime.transition('LISTENING')
@@ -740,6 +742,8 @@ class JarvisLive:
     def _finalize_input(self):
         if self._loop and self.session and self.out_queue:
             def enqueue():
+                handoff=getattr(self,'_mic_handoff',None)
+                if handoff:handoff.drain()
                 # Keep end marker after all accepted PCM frames. If full, finish
                 # through a tracked task rather than dropping the marker.
                 async def finish():
@@ -840,8 +844,12 @@ class JarvisLive:
     def _wake_state(self) -> dict:
         # A loaded, running detector is definitively ready; otherwise fall back
         # to the cheap on-disk model-file check (no Model construction).
-        ready = bool(self._wake_detector and self._wake_detector.ready) or wake_is_ready()
-        return {"enabled": self._wake_enabled, "awake": self._awake, "ready": ready}
+        running = bool(self._wake_detector and self._wake_detector.ready)
+        ready = running or wake_is_ready()
+        from core.wake_word import is_installed
+        error = getattr(self._wake_detector,'error','')
+        status = ('ERROR' if error and not running else 'NOT INSTALLED' if not is_installed() else 'MODELS MISSING' if not ready else 'LISTENING' if running and not self._awake and not self.ui.muted and self.runtime.mic else 'ENABLED' if running else 'READY')
+        return {"enabled": self._wake_enabled, "awake": self._awake, "ready": ready, 'running':running,'status':status}
 
     def _ensure_wake_detector(self) -> bool:
         """Load the detector once (model loads on first start). Idempotent."""
@@ -881,8 +889,12 @@ class JarvisLive:
 
     async def _run_sleep_watch(self) -> None:
         """Auto-sleep after the configured silence window (wake-word mode only)."""
+        last_wake_retry=0.0
         while True:
             await asyncio.sleep(5)
+            if self._wake_enabled and (not self._wake_detector or not self._wake_detector.ready) and time.monotonic()-last_wake_retry>=60:
+                last_wake_retry=time.monotonic()
+                await asyncio.to_thread(self._ensure_wake_detector)
             if not self._awake:
                 continue
             with self._speaking_lock:
@@ -947,6 +959,7 @@ class JarvisLive:
             return
 
         async def _say():
+            if self.ui.muted or not self._awake or not self.session:return
             try:
                 await self.session.send_client_content(
                     turns={"role": "user", "parts": [{"text": instruction}]},
@@ -972,9 +985,6 @@ class JarvisLive:
         ev   = self._reconnect_event
         self._reconnect_keep   = keep_context
         self._reconnect_reason = reason
-        if reason in {"new voice","explicit retry"}:
-            self._tuned_live=True
-            self._enhanced_live=True
         if loop and ev is not None:
             loop.call_soon_threadsafe(ev.set)
 
@@ -1116,6 +1126,7 @@ class JarvisLive:
         """Chord pressed or released — may arrive on the hotkey thread."""
         if held==self._ptt_held:return
         self._ptt_held = held
+        if held and getattr(self,'_is_speaking',False):self.interrupt()
         if held:
             self._capture_enabled.set()
             # Holding the key is also a way to wake it, so push-to-talk works
@@ -1197,16 +1208,16 @@ class JarvisLive:
         # Load customization from config
         try:
             from memory.config_manager import load_api_keys
-            _cfg = load_api_keys()
+            _cfg = {} if getattr(self,'_diagnostic',False) else load_api_keys()
             self._asst_name = (_cfg.get("assistant_name") or "JARVIS").strip()
             _user_name = (_cfg.get("user_name") or "").strip()
         except Exception:
             self._asst_name = "JARVIS"
             _user_name = ""
 
-        memory     = load_memory()
+        memory     = {} if getattr(self,'_diagnostic',False) else load_memory()
         mem_str    = format_memory_for_prompt(memory)
-        sys_prompt = _load_system_prompt()
+        sys_prompt = 'You are Jarvis. This is a connection diagnostic. Do not execute actions.' if getattr(self,'_diagnostic',False) else _load_system_prompt()
 
         now      = datetime.now()
         time_str = now.strftime("%A, %B %d, %Y — %I:%M %p")
@@ -1303,7 +1314,8 @@ class JarvisLive:
         if self._tuned_live:
             cfg.update(self._tuning_config())
 
-        return types.LiveConnectConfig(**cfg)
+        from core.live_config import compatible_config
+        return compatible_config(cfg, _gemini.live_model(), self.ui.write_log if hasattr(self, 'ui') else print)
 
     def _tuning_config(self) -> dict:
         """The optional knobs, kept apart so one bad field can be dropped wholesale.
@@ -1528,7 +1540,8 @@ class JarvisLive:
         # the API default and behave as they always have.
         _sched = (self._action_registry.scheduling(name)
                   or self._plugin_registry.scheduling(name))
-        _extra = {"scheduling": _sched} if _sched else {}
+        from core.live_config import capabilities
+        _extra = {"scheduling": _sched} if _sched and capabilities(_gemini.live_model()).async_tools else {}
         return types.FunctionResponse(
             id=fc.id, name=name,
             response={"result": result},
@@ -1559,7 +1572,11 @@ class JarvisLive:
         print("[JARVIS] 🎤 Mic started")
         loop = asyncio.get_event_loop()
 
-        def callback(indata, frames, time_info, status):
+        from core.audio_handoff import AudioHandoff
+
+        def process_frame(indata, context):
+            allowed, epoch, status = context
+            frames=len(indata)
             self._mic_frames += frames
             level = _pcm_level(indata)
             self._mic_peak = max(self._mic_peak, float(np.max(np.abs(indata.astype(np.float32)))))
@@ -1629,15 +1646,12 @@ class JarvisLive:
             # When it is on the microphone is closed by default and the chord
             # opens it, which is the whole point: nothing leaves the machine
             # unless you are holding the key.
-            if self._ptt_enabled and not self._ptt_held and not self._manual_listening:
+            if self._ptt_enabled and not allowed:
                 return
 
-            if not self.ui.muted and not self._phone_active and self.session and self.out_queue:
+            if not self.ui.muted and not self._phone_active and self.session and self.out_queue and epoch==self._session_epoch:
                 data = indata.tobytes()
-                loop.call_soon_threadsafe(
-                    offer_audio, self.out_queue,
-                    {"data": data, "mime_type": "audio/pcm;rate=16000"}
-                )
+                offer_audio(self.out_queue, {"data": data, "mime_type": "audio/pcm;rate=16000"})
                 if level > 0.05:
                     self._last_user_speech=time.monotonic()
                     self.runtime.transition('HEARING SPEECH')
@@ -1648,6 +1662,11 @@ class JarvisLive:
                     self.ui.set_audio_level(_pcm_level(indata))
                 except Exception:
                     pass
+
+        handoff=AudioHandoff(loop,process_frame)
+        self._mic_handoff=handoff
+        def callback(indata, frames, time_info, status):
+            handoff.offer(indata,(self._ptt_held or self._manual_listening,self._session_epoch,bool(status)),bool(getattr(status,'input_overflow',False)))
 
         try:
             def _open_mic(dev):
@@ -1685,7 +1704,8 @@ class JarvisLive:
                 _mic_stream = _open_mic(None)
 
             with _mic_stream:
-                self.ui.write_log('SYS: Selected microphone: '+str(sd.query_devices(_mic_stream.device)['name']))
+                self._actual_input_name=str(sd.query_devices(_mic_stream.device)['name'])
+                self.ui.write_log('SYS: Selected microphone: '+self._actual_input_name)
                 last_frames=self._mic_frames
                 last_check=time.monotonic()
                 print("[JARVIS] 🎤 Mic stream open")
@@ -1695,12 +1715,16 @@ class JarvisLive:
                         self._audio_restart=False
                         return
                     if time.monotonic()-last_check>3:
+                        if handoff.dropped or handoff.overflows:
+                            self.ui.write_log(f'SYS: Capture counters: input overflows={handoff.overflows}, dropped frames={handoff.dropped}. Try another host API/device if increasing.')
                         if self._mic_frames==last_frames:raise RuntimeError('Microphone delivered no frames')
                         last_frames=self._mic_frames
                         last_check=time.monotonic()
         except Exception as e:
-            print(f"[JARVIS] ❌ Mic: {e}")
+            print(f"[JARVIS] ❌ Mic: {type(e).__name__}")
             raise
+        finally:
+            handoff.close()
 
     async def _flush_pending_vision(self) -> bool:
         """Send a captured frame immediately after its tool response.
@@ -1783,9 +1807,15 @@ class JarvisLive:
 
                     if response.server_content:
                         sc = response.server_content
+                        if getattr(sc,'interrupted',False):
+                            self.interrupt()
+                            self._interrupted=False
+                            in_buf=[]
+                            out_buf=[]
+                            audio_generated=False
 
                         if sc.output_transcription and sc.output_transcription.text:
-                            txt = _clean_transcript(sc.output_transcription.text)
+                            txt = sc.output_transcription.text
                             # A turn that involves a tool call passes through
                             # several turn_completes, and the API re-sends the
                             # tail of the transcript across them. Comparing only
@@ -1793,7 +1823,7 @@ class JarvisLive:
                             # out_buf had been flushed and emptied, the repeat
                             # sailed straight back in, which logged the answer
                             # twice AND made the avatar mouth it twice.
-                            if txt and not _is_repeat_chunk(txt, out_buf):
+                            if txt and (len(txt)<_REPEAT_MIN or not _is_repeat_chunk(txt, out_buf)):
                                 out_buf.append(txt)
                                 # Hand the words to the mouth as they arrive, so
                                 # the avatar can form the consonants the audio
@@ -1802,7 +1832,7 @@ class JarvisLive:
                                 self._visemes.feed_text(txt)
 
                         if sc.input_transcription and sc.input_transcription.text:
-                            txt = _clean_transcript(sc.input_transcription.text)
+                            txt = sc.input_transcription.text
                             if txt:
                                 in_buf.append(txt)
                                 self._last_user_speech = time.monotonic()
@@ -1820,7 +1850,7 @@ class JarvisLive:
                                 self._visemes.reset()
                                 continue
 
-                            full_in = " ".join(in_buf).strip()
+                            full_in = _clean_transcript("".join(in_buf))
                             if full_in:
                                 self._last_out_logged = ""   # new exchange
                                 self.ui.write_log(f"You: {full_in}")
@@ -1833,7 +1863,7 @@ class JarvisLive:
                                     }))
                             in_buf = []
 
-                            full_out = " ".join(out_buf).strip()
+                            full_out = _clean_transcript("".join(out_buf))
                             # Second line of defence: even if a repeat slips
                             # into a *fresh* buffer after a flush, never log the
                             # same answer (or a tail of it) twice in a row.
@@ -1945,7 +1975,8 @@ class JarvisLive:
 
         self._output_stream=stream
         self._output_ready=True
-        self.ui.write_log('SYS: Selected output: '+str(sd.query_devices(stream.device)['name']))
+        self._actual_output_name=str(sd.query_devices(stream.device)['name'])
+        self.ui.write_log('SYS: Selected output: '+self._actual_output_name)
         # Ask the device how far behind the speakers actually are, rather than
         # assuming. This is what the echo tail is sized from, so a machine with a
         # large audio buffer gets a correspondingly longer guard — and one with a
@@ -2055,6 +2086,21 @@ class JarvisLive:
 
     # ── Morning briefing ────────────────────────────────────────────────────────
 
+    def _proactive_allowed(self, setting):
+        from memory.config_manager import load_api_keys
+        cfg=load_api_keys()
+        if not cfg.get(setting,False) or self.ui.muted or not self.session or not self._awake or self._is_speaking:
+            return False
+        quiet=cfg.get('quiet_hours',[22,8])
+        try:
+            start,end=(int(v) for v in quiet)
+            if not (0<=start<=23 and 0<=end<=23):return False
+        except (TypeError,ValueError):return False
+        hour=datetime.now().hour
+        if start!=end and ((start<=hour<end) if start<end else (hour>=start or hour<end)):
+            return False
+        return True
+
     async def _send_startup_briefing(self) -> None:
         """
         Two-phase briefing optimized for speed:
@@ -2064,6 +2110,7 @@ class JarvisLive:
                     shown on the UI content panel. Waits for turn_complete event
                     instead of a fixed sleep so there is no unnecessary gap.
         """
+        if not self._proactive_allowed('morning_brief_enabled'):return
         memory   = load_memory()
         identity = memory.get("identity", {})
 
@@ -2080,7 +2127,7 @@ class JarvisLive:
         news_future = in_executor(loop,None, _fetch_news_sync, "top world news today")
 
         await asyncio.sleep(0.3)
-        if not self.session:
+        if not self._proactive_allowed('morning_brief_enabled'):
             return
 
         # ── Phase 1: instant greeting ─────────────────────────────────────────
@@ -2226,7 +2273,7 @@ class JarvisLive:
         while True:
             await asyncio.sleep(10)
             alert = await asyncio.to_thread(self._sys_monitor.check)
-            if not alert or not self.session or not self._awake:
+            if not alert or not self._proactive_allowed('system_alerts_enabled'):
                 continue
             # Don't interrupt an active conversation
             with self._speaking_lock:
@@ -2247,7 +2294,7 @@ class JarvisLive:
         """Check user-configured topics once per day; speak alerts when new headlines appear."""
         await asyncio.sleep(300)          # wait 5 min after startup before first check
         while True:
-            if self.session and self._awake:
+            if self._proactive_allowed('monitor_alerts_enabled'):
                 # Don't interrupt if user spoke recently or JARVIS is mid-sentence
                 with self._speaking_lock:
                     speaking = self._is_speaking
@@ -2259,6 +2306,7 @@ class JarvisLive:
                         lang_e = memory.get("identity", {}).get("language", {})
                         lang   = (lang_e.get("value", "") if isinstance(lang_e, dict) else str(lang_e)).strip() or "English"
                         for alert in alerts:
+                            if not self._proactive_allowed('monitor_alerts_enabled'):break
                             msg = (
                                 f"{alert}\n\n"
                                 f"Inform the user about this development naturally in {lang}. "
@@ -2285,7 +2333,7 @@ class JarvisLive:
         while True:
             await asyncio.sleep(60)   # evaluate once per minute
 
-            if not self.session or not self._awake:
+            if not self._proactive_allowed('proactive_checkins_enabled'):
                 continue
 
             with self._speaking_lock:
@@ -2302,6 +2350,7 @@ class JarvisLive:
                 memory       = await asyncio.to_thread(load_memory)
                 monitors     = await asyncio.to_thread(list_monitors)
                 recent_turns = self._session_log[-8:] if self._session_log else []
+                if not self._proactive_allowed('proactive_checkins_enabled'):continue
                 prompt = self._proactive.build_prompt(
                     memory       = memory,
                     monitors     = monitors or None,
@@ -2454,15 +2503,18 @@ class JarvisLive:
                 live_model = LIVE_MODEL
                 print(f"[JARVIS] Live model: {live_model}")
 
+                import hashlib
+                identity=(live_model, __import__('core.live_config',fromlist=['api_version']).api_version(), hashlib.sha256(_get_api_key().encode()).digest())
+                if getattr(self,'_resume_identity',None)!=identity:
+                    self._resume_handle=None
+                    self._resume_identity=identity
                 _resumed_with = self._resume_handle is not None
                 config = self._build_config()
 
-                # Fresh client on every reconnect — avoids stale HTTP session state
-                # v1alpha carries proactive audio; if it gets rejected we fall
-                # back to v1beta.
+                # Shared effective API version; no speculative alpha/proactive setup.
                 client = genai.Client(
                     api_key=_get_api_key(),
-                    http_options={"api_version": "v1alpha" if self._enhanced_live else "v1beta"}
+                    http_options={"api_version": __import__("core.live_config", fromlist=["api_version"]).api_version()}
                 )
 
                 from core.provider_errors import connect_with_timeout
@@ -2475,6 +2527,9 @@ class JarvisLive:
                     self._delivery_tail = None
                     self.session          = session
                     self.out_queue        = asyncio.Queue(maxsize=20)
+                    if self._dashboard:
+                        while not self._dashboard._phone_audio_queue.empty():
+                            self._dashboard._phone_audio_queue.get_nowait()
 
                     # Reset transient state that must not carry over from a previous session
                     self._pending_vision       = None
@@ -2491,7 +2546,7 @@ class JarvisLive:
                         # Say it plainly: the difference between "it reconnected"
                         # and "it reconnected and still knows what we were doing"
                         # is the whole point, and it is invisible otherwise.
-                        self.ui.write_log("SYS: Reconnected — conversation restored.")
+                        self.ui.write_log("SYS: Reconnected with a resumption handle; verify conversation continuity.")
 
                     # Wake word: if enabled, come up ASLEEP (mic gated, silent)
                     # until the user says "Hey Jarvis" or taps wake in the UI.
@@ -2552,13 +2607,28 @@ class JarvisLive:
 
                 from core.provider_errors import classify, retry_delay
                 failure=classify(e)
+                self.session=None
+                self.out_queue=None
                 self.runtime.provider=False
+                self._tasks.cancel_all()
+                for delivery in list(self._deliveries):delivery.cancel()
+                self.set_speaking(False)
+                while not self.audio_in_queue.empty():
+                    try:self.audio_in_queue.get_nowait()
+                    except asyncio.QueueEmpty:break
+                if self._output_stream:
+                    try:self._output_stream.abort()
+                    except Exception:pass
                 self.ui.write_log('ERR: '+failure.message)
-                if failure.kind=='CONFIG' and self._tuned_live:
+                if not connected_at and failure.kind=='CONFIG' and self._resume_handle:
+                    self._resume_handle=None
+                    self.ui.write_log('SYS: Resumption rejected; trying a fresh session once.')
+                    continue
+                if not connected_at and failure.kind=='CONFIG' and self._tuned_live:
                     self._tuned_live=False
                     self.ui.write_log('SYS: Retrying with optional Live tuning removed.')
                     continue
-                if failure.kind=='CONFIG' and self._enhanced_live:
+                if not connected_at and failure.kind=='CONFIG' and self._enhanced_live and __import__('core.live_config',fromlist=['capabilities']).capabilities(live_model).proactive:
                     self._enhanced_live=False
                     self.ui.write_log('SYS: Retrying without optional proactive audio.')
                     continue
@@ -2568,14 +2638,11 @@ class JarvisLive:
                     self.runtime.transition('PROVIDER_UNAVAILABLE' if not failure.retryable else 'ERROR')
                     self.ui.write_log('SYS: Automatic retries stopped. Use Retry Provider or update credentials. Local audio diagnostics remain available.')
                     self._reconnect_event.clear()
-                    if failure.kind in {'AUTH','MISSING_CREDENTIAL'}:self.ui.prompt_reconfig()
+                    if failure.kind in {'AUTH','MISSING_CREDENTIAL','CREDENTIAL_FORMAT'}:self.ui.prompt_reconfig()
                     while not self._shutdown_requested:
                         if self._reconnect_event.is_set():break
-                        if failure.kind in {'AUTH','MISSING_CREDENTIAL'} and self.ui._win._ready:break
                         await asyncio.sleep(0.2)
                     attempts=0
-                    self._tuned_live=True
-                    self._enhanced_live=True
                     continue
                 self._conn_backoff=retry_delay(attempts)
                 self.runtime.transition('RECONNECTING')
@@ -2591,6 +2658,13 @@ class JarvisLive:
                     except Exception:self.ui.write_log('SYS: Provider client cleanup failed; diagnostic required.')
                 self.session = None
                 self.runtime.provider=False
+                self.set_speaking(False)
+                while not self.audio_in_queue.empty():
+                    try:self.audio_in_queue.get_nowait()
+                    except asyncio.QueueEmpty:break
+                if self._output_stream is not None:
+                    try:self._output_stream.abort()
+                    except Exception:pass
                 for delivery in list(self._deliveries):delivery.cancel()
                 if self._deliveries:await asyncio.gather(*self._deliveries,return_exceptions=True)
                 # Only save if there was a real conversation (≥3 turns)

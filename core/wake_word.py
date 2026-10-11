@@ -139,6 +139,7 @@ class WakeWordDetector:
         self._running = False
         self._model = None
         self._ready = False
+        self.error = ''
         self._lifecycle_lock=threading.RLock()
 
     def start(self) -> bool:
@@ -165,6 +166,8 @@ class WakeWordDetector:
             self._notify("Wake word unavailable — use the WAKE NOW button.")
             self._model = None
             return False
+        self._drain()
+        self.error = ''
         self._running = True
         self._ready = True
         self._thread = threading.Thread(target=self._loop, daemon=True, name="WakeWordThread")
@@ -192,7 +195,7 @@ class WakeWordDetector:
 
     @property
     def ready(self) -> bool:
-        return self._ready
+        return bool(self._ready and self._running and self._thread and self._thread.is_alive())
 
     def feed(self, frame_int16) -> None:
         """Called from the mic callback (real-time thread). Must stay cheap and
@@ -212,12 +215,14 @@ class WakeWordDetector:
         import numpy as np
         cooldown_until=0.0
         import time
+        failures = 0
         while self._running:
             try:
                 frame = self._queue.get()
                 if frame is None or not self._running:
                     break
                 scores = self._model.predict(np.asarray(frame, dtype=np.int16))
+                failures = 0
                 score = 0.0
                 if isinstance(scores, dict):
                     # match the jarvis model regardless of exact key suffix
@@ -235,7 +240,16 @@ class WakeWordDetector:
                     except Exception as e:
                         self._logger(f"Wake word: on_detect error — {e}")
             except Exception as e:
-                self._logger(f"Wake word: inference error — {e}")
+                failures += 1
+                self.error = type(e).__name__
+                self._logger('Wake word inference failed: '+self.error)
+                if failures >= 3:
+                    self._running = False
+                    self._ready = False
+                    self._notify('Wake detector stopped after repeated inference errors; manual listening/PTT remain available.')
+                    break
+        self._running = False
+        self._ready = False
 
     def _drain(self) -> None:
         try:

@@ -8,6 +8,9 @@ import sys
 import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
+from core.redaction import install
+install()
+
 def diagnose(args):
     rows=[]
     def add(check,status,detail):rows.append(dict(check=check,status=status,detail=detail))
@@ -76,7 +79,7 @@ def diagnose(args):
             pcm=np.interp(np.arange(count)*rate/24000,np.arange(len(x)),x).astype(np.int16).tobytes()
             with sd.RawOutputStream(device=dev,samplerate=24000,channels=1,dtype='int16') as output:
                 output.write(pcm)
-            rows[-1].update(status='NEEDS_HUMAN',detail='Actual output write completed. Confirm audibility and selected device')
+            rows[-1].update(status='NEEDS_HARDWARE',detail='Actual output write completed. Confirm audibility and selected device')
         except Exception as e:
             failed=rows[-1] if rows[-2]['status']=='PASS' else rows[-2]
             failed.update(status='FAIL',detail=type(e).__name__)
@@ -90,21 +93,9 @@ def diagnose(args):
         rows[-1].update(status='PASS' if True in changes and False in changes else 'FAIL',detail=f'Actual key polling scope={scope}; no command-dispatch claim')
     add('Provider reachability/authentication','SKIPPED','Use --provider; contacts configured Google account without audio')
     if args.provider:
-        from google import genai
-        from core.provider_errors import classify
         import asyncio
-        async def probe():
-            from core.gemini import live_model
-            from core.provider_errors import connect_with_timeout
-            client=genai.Client(api_key=get_gemini_key(),http_options={'api_version':'v1beta','timeout':20000})
-            try:
-                async with asyncio.timeout(20):
-                    async with connect_with_timeout(client,live_model(),{'response_modalities':['AUDIO']}):pass
-            finally:await client.aio.aclose();client.close()
-        try:
-            asyncio.run(probe());rows[-1].update(status='PASS',detail='Actual basic Live connect; tuned configuration/STT/TTS still need application test')
-        except Exception as e:
-            failure=classify(e);rows[-1].update(status='FAIL',detail=failure.kind+': '+failure.message)
+        from tools.live_probe import run
+        rows.extend(asyncio.run(run(network=True)))
     add('Error classification','SKIPPED','Run tests/test_voice_runtime.py; mocked responses are documented separately')
     add('State transitions','SKIPPED','Run automated voice tests and inspect real HUD transitions')
     add('Stop/cancel behavior','SKIPPED','Run mocked regression then physical playback interruption acceptance')

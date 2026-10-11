@@ -118,7 +118,7 @@ class RunLoopTests(unittest.IsolatedAsyncioTestCase):
             async def __aenter__(self):raise error
             async def __aexit__(self,*unused):pass
         client=Mock();client.aio.live.connect=Mock(return_value=Context());client.aio.aclose=AsyncMock()
-        with patch('main.sd',None),patch('main.audio_devices.prefetch'),patch('main._get_api_key',return_value='test-fixture'),patch('main.genai.Client',return_value=client) as create,patch('core.provider_errors.retry_delay',return_value=.001),patch('dashboard.server.DashboardServer',side_effect=ImportError('not installed')):
+        with patch('main.sd',None),patch('main.audio_devices.prefetch'),patch('main._get_api_key',return_value='AIza'+'DUMMY_'*5),patch('main.genai.Client',return_value=client) as create,patch('core.provider_errors.retry_delay',return_value=.001),patch('dashboard.server.DashboardServer',side_effect=ImportError('not installed')):
             await asyncio.wait_for(app.run(),timeout=3)
         self.assertEqual(app.runtime.state,State.STOPPED)
         self.assertTrue(all(task.done() for task in app._lifetime))
@@ -164,7 +164,7 @@ class AudioWorkerTests(unittest.IsolatedAsyncioTestCase):
         from unittest.mock import patch
         ui=Mock();ui.muted=False
         with patch('main.get_push_to_talk_enabled',return_value=False),patch('main.get_wake_word_enabled',return_value=False):app=main.JarvisLive(ui)
-        app._capture_enabled.set();app._awake=True;app._shutdown_requested=True
+        app._capture_enabled.set();app._awake=True;app._shutdown_requested=False
         app.runtime.provider=True;app.session=Mock();app.out_queue=asyncio.Queue(maxsize=20)
         fake_sd=Mock();fake_sd.query_devices.return_value={'name':'Mock microphone'}
         callbacks=[]
@@ -173,6 +173,7 @@ class AudioWorkerTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self,**kw):callbacks.append(kw)
             def __enter__(self):
                 callbacks[0]['callback'](np.full((1024,1),1000,dtype=np.int16),1024,None,None)
+                asyncio.get_running_loop().call_soon(setattr,app,'_shutdown_requested',True)
                 return self
             def __exit__(self,*unused):pass
         fake_sd.InputStream=Input

@@ -1,0 +1,1 @@
+PASS: actual bundled CryptoJS envelope decrypted by Python; Unicode, MAC tampering and replay verified. No physical browser/TLS validation.

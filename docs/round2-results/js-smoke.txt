@@ -1,0 +1,1 @@
+PASS: both dashboard inline scripts parse; actual HTML encoder escapes tag/attribute payloads; no insecure-origin bypass guide. No real browser/TLS test.

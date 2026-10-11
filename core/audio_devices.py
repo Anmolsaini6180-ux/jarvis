@@ -258,7 +258,8 @@ def _is_pseudo(name: str) -> bool:
 def _query() -> dict[str, list[str]]:
     """Return {'input': [names...], 'output': [names...]}. Never raises.
 
-    Only real, selectable devices — see the note above."""
+    Input enumeration never opens a microphone. Actual format/capture readiness
+    is verified only after manual/PTT/wake opt-in by the runtime stream."""
     out: dict[str, list[str]] = {"input": [], "output": []}
     try:
         import platform
@@ -287,7 +288,7 @@ def _query() -> dict[str, list[str]]:
                     api = apis[dev["hostapi"]].lower() if dev.get("hostapi", -1) < len(apis) else ""
                     if api_filter not in api:
                         continue
-                if not _usable(idx, kind):
+                if kind != "input" and not _usable(idx, kind):
                     continue
                 seen.add(name)
                 found.append((idx, name))
@@ -303,7 +304,7 @@ def _query() -> dict[str, list[str]]:
                 if not found:
                     continue
                 # One probe per API per direction, cached, on this thread.
-                if not _transport_works(found[0][0], kind, (api_filter, kind)):
+                if kind != "input" and not _transport_works(found[0][0], kind, (api_filter, kind)):
                     continue
                 _chosen_api[kind] = api_filter
                 out[kind] = [_display_name(n, devices) for _i, n in found]

@@ -21,7 +21,7 @@ class DashboardSecurity(unittest.TestCase):
   self.assertEqual(self.client.post('/api/command',headers=h,content=b'{bad').status_code,400)
   self.assertEqual(self.client.post('/api/command',headers=h,json={'enc':12}).status_code,400)
   from starlette.websockets import WebSocketDisconnect
-  with self.client.websocket_connect('/ws?token='+tok) as ws:
+  with self.client.websocket_connect('/ws?ticket='+self.server._ticket(tok,'events')) as ws:
    ws.send_json([])
    with self.assertRaises(WebSocketDisconnect):
     for _ in range(10):ws.receive_json()
@@ -53,7 +53,7 @@ class DashboardSecurity(unittest.TestCase):
   self.assertEqual(r.status_code,413);self.assertFalse(list(Path(self.tmp.name).iterdir()))
  def test_websocket_expiry_and_revocation(self):
   tok,h=self.login()
-  with self.client.websocket_connect('/ws?token='+tok) as ws:
+  with self.client.websocket_connect('/ws?ticket='+self.server._ticket(tok,'events')) as ws:
    self.server._token_expiry[tok]=0
    # No command is accepted after expiry, even if socket has not yet timed out.
    ws.send_json({'type':'command','text':'fake'})
@@ -62,7 +62,7 @@ class DashboardSecurity(unittest.TestCase):
     while True:ws.receive_json()
   self.assertTrue(self.server._command_queue.empty())
   tok,h=self.login()
-  with self.client.websocket_connect('/ws?token='+tok) as ws:
+  with self.client.websocket_connect('/ws?ticket='+self.server._ticket(tok,'events')) as ws:
    self.client.post('/api/revoke-devices',headers=h)
    with self.assertRaises(WebSocketDisconnect):
     while True:ws.receive_json()

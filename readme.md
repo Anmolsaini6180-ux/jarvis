@@ -1,3 +1,5 @@
+> **Round 2 (2026-10-11):** Current Live/credential/dashboard fixes and evidence are in [ROUND2_REPAIR_REPORT.md](docs/ROUND2_REPAIR_REPORT.md). Use the external-venv instructions at the top of [WINDOWS_SETUP.md](WINDOWS_SETUP.md). The sections below retain earlier repair history; conflicting setup/configuration claims are superseded.
+
 > Current voice behavior and acceptance limits: [Voice runtime repair](docs/VOICE_RUNTIME_REPAIR.md). This supersedes older voice setup guidance below.
 
 # Mark LV / Jarvis — repaired desktop assistant
